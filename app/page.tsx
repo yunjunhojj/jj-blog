@@ -1,64 +1,118 @@
-import Image from "next/image";
-
 export default function Home() {
+  const posts = [
+    {
+      title: "Context Inheritance in TanStack Router",
+      date: "12.10.2025",
+      readTime: "3 min read",
+      slug: "context-inheritance-tanstack-router",
+    },
+    {
+      title: "Deriving Client State from Server State",
+      date: "01.09.2025",
+      readTime: "3 min read",
+      slug: "deriving-client-state-from-server-state",
+    },
+    {
+      title: "React Query Selectors, Supercharged",
+      date: "04.08.2025",
+      readTime: "6 min read",
+      slug: "react-query-selectors-supercharged",
+    },
+    {
+      title: "The Useless useCallback",
+      date: "28.07.2025",
+      readTime: "5 min read",
+      slug: "useless-usecallback",
+    },
+    {
+      title: "The Beauty of TanStack Router",
+      date: "25.05.2025",
+      readTime: "7 min read",
+      slug: "beauty-of-tanstack-router",
+    },
+    {
+      title: "Concurrent Optimistic Updates in React Query",
+      date: "28.04.2025",
+      readTime: "5 min read",
+      slug: "concurrent-optimistic-updates-react-query",
+    },
+  ];
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div className="min-h-screen bg-white dark:bg-gray-950">
+      <main className="mx-auto max-w-4xl px-6 py-16 sm:px-8 lg:px-12">
+        {/* Header Section */}
+        <div className="mb-16">
+          <h1 className="mb-4 text-4xl font-bold text-gray-900 dark:text-gray-100">
+            Hi 👋, I&apos;m Junho (JJ)
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p className="mb-4 text-lg text-gray-700 dark:text-gray-300">
+            저는 3년차 프론트엔드 개발자이며, React, TypeScript를 활용해서 웹 애플리케이션을 개발합니다.
+          </p>
+          <p className="text-base text-gray-600 dark:text-gray-400">
+            부족한 점을 보완하기 위해 공부를 하고있으며 이 블로그에서는 공부한 내용을 정리하고 있습니다.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        {/* Latest Posts Section */}
+        <div className="mb-12">
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+              Latest Posts
+            </h2>
+            <a
+              href="/posts"
+              className="text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+            >
+              Read all posts →
+            </a>
+          </div>
+
+          <div className="space-y-6">
+            {posts.map((post, index) => (
+              <article
+                key={index}
+                className="group cursor-pointer rounded-lg p-6 transition-colors hover:bg-gray-50 dark:hover:bg-gray-900"
+              >
+                <a href={`/posts/${post.slug}`} className="block">
+                  <h3 className="mb-2 text-xl font-semibold text-gray-900 group-hover:text-blue-600 dark:text-gray-100 dark:group-hover:text-blue-400">
+                    {post.title}
+                  </h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {post.date}, {post.readTime}
+                  </p>
+                </a>
+              </article>
+            ))}
+          </div>
         </div>
+
+        {/* Footer Section */}
+        <footer className="border-t border-gray-200 pt-8 dark:border-gray-800">
+          <div className="flex flex-col space-y-4 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              © 2025 JJ Blog. All rights reserved.
+            </p>
+            <div className="flex space-x-6">
+              <a
+                href="https://github.com/yunjunhojj"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+              >
+                GitHub
+              </a>
+              <a
+                href="https://docs.google.com/document/d/1jDKNiBXMjg1uxB-pCEq55tSLTamWRcla_7pYAH4fKCI/edit?tab=t.0"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+              >
+                Resume
+              </a>
+            </div>
+          </div>
+        </footer>
       </main>
     </div>
   );
