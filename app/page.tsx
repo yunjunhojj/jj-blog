@@ -1,42 +1,7 @@
+import { getLatestPosts } from '@/lib/posts';
+
 export default function Home() {
-  const posts = [
-    {
-      title: "Context Inheritance in TanStack Router",
-      date: "12.10.2025",
-      readTime: "3 min read",
-      slug: "context-inheritance-tanstack-router",
-    },
-    {
-      title: "Deriving Client State from Server State",
-      date: "01.09.2025",
-      readTime: "3 min read",
-      slug: "deriving-client-state-from-server-state",
-    },
-    {
-      title: "React Query Selectors, Supercharged",
-      date: "04.08.2025",
-      readTime: "6 min read",
-      slug: "react-query-selectors-supercharged",
-    },
-    {
-      title: "The Useless useCallback",
-      date: "28.07.2025",
-      readTime: "5 min read",
-      slug: "useless-usecallback",
-    },
-    {
-      title: "The Beauty of TanStack Router",
-      date: "25.05.2025",
-      readTime: "7 min read",
-      slug: "beauty-of-tanstack-router",
-    },
-    {
-      title: "Concurrent Optimistic Updates in React Query",
-      date: "28.04.2025",
-      readTime: "5 min read",
-      slug: "concurrent-optimistic-updates-react-query",
-    },
-  ];
+  const posts = getLatestPosts();
 
   return (
     <div className="min-h-screen bg-white dark:bg-gray-950">
