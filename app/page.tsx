@@ -1,4 +1,5 @@
 import { getLatestPosts } from '@/lib/posts';
+import dayjs from 'dayjs';
 
 export default function Home() {
   const posts = getLatestPosts();
@@ -56,7 +57,7 @@ export default function Home() {
         <footer className="border-t border-gray-200 pt-8 dark:border-gray-800">
           <div className="flex flex-col space-y-4 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              © 2025 JJ Blog. All rights reserved.
+              © {dayjs().year()} JJ Blog. All rights reserved.
             </p>
             <div className="flex space-x-6">
               <a
