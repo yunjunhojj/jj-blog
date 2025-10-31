@@ -1,58 +1,88 @@
-import { getLatestPosts } from "@/lib/posts";
+import { getLatestPosts, getPostsByCategory } from "@/lib/posts";
+import PostCard from "@/components/PostCard";
+import Sidebar from "@/components/Sidebar";
 import Link from "next/link";
 
-export default function Home() {
-  const posts = getLatestPosts();
+interface HomeProps {
+  searchParams: Promise<{ category?: string }>;
+}
+
+export default async function Home({ searchParams }: HomeProps) {
+  const params = await searchParams;
+  const category = params?.category;
+
+  let posts;
+  let title = "최신 포스트";
+  let subtitle = "개발과 관련된 최신 글들을 만나보세요";
+
+  if (category) {
+    posts = getPostsByCategory(category);
+    title = `${category} 카테고리`;
+    subtitle = `${category} 카테고리에 속한 포스트 ${posts.length}개`;
+  } else {
+    posts = getLatestPosts(6);
+  }
 
   return (
-    <>
-      {/* Header Section */}
-      <section className="mb-16">
-        <h1 className="mb-4 text-4xl font-bold text-gray-900 dark:text-gray-100">
-          Hi 👋, I&apos;m Junho (JJ)
-        </h1>
-        <p className="mb-4 text-lg text-gray-700 dark:text-gray-300">
-          저는 3년차 프론트엔드 개발자이며, React, TypeScript를 활용해서 웹
-          애플리케이션을 개발합니다.
-        </p>
-        <p className="text-base text-gray-600 dark:text-gray-400">
-          부족한 점을 보완하기 위해 공부를 하고있으며 이 블로그에서는 공부한
-          내용을 정리하고 있습니다.
-        </p>
-      </section>
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      {/* Main Content */}
+      <div className="lg:col-span-2">
+        {/* Latest Posts Section */}
+        <section className="mb-12">
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+                {title}
+              </h2>
+              {category && (
+                <Link
+                  href="/"
+                  className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                >
+                  전체 보기
+                </Link>
+              )}
+            </div>
+            <p className="text-gray-600 dark:text-gray-400">{subtitle}</p>
+          </div>
 
-      {/* Latest Posts Section */}
-      <section className="mb-12">
-        <div className="mb-6 flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            Latest Posts
-          </h2>
-          <Link
-            href="/posts"
-            className="text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
-          >
-            Read all posts →
-          </Link>
-        </div>
-
-        <div className="space-y-6">
-          {posts.map((post, index) => (
-            <article
-              key={index}
-              className="group cursor-pointer rounded-lg p-6 transition-colors hover:bg-gray-50 dark:hover:bg-gray-900"
-            >
-              <Link href={`/posts/${post.slug}`} className="block">
-                <h3 className="mb-2 text-xl font-semibold text-gray-900 group-hover:text-blue-600 dark:text-gray-100 dark:group-hover:text-blue-400">
-                  {post.title}
-                </h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {post.date}, {post.readTime}
-                </p>
+          {posts.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-gray-500 dark:text-gray-400 mb-4">
+                해당 카테고리에 포스트가 없습니다.
+              </p>
+              <Link
+                href="/"
+                className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+              >
+                전체 포스트 보기
               </Link>
-            </article>
-          ))}
-        </div>
-      </section>
-    </>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {posts.map((post) => (
+                <PostCard
+                  key={post.slug}
+                  title={post.title}
+                  date={post.date}
+                  readTime={post.readTime}
+                  description={post.description}
+                  tags={post.tags}
+                  slug={post.slug}
+                  image={post.image}
+                  likes={post.likes}
+                  comments={post.comments}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+
+      {/* Sidebar */}
+      <div className="lg:col-span-1">
+        <Sidebar />
+      </div>
+    </div>
   );
 }
