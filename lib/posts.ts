@@ -10,6 +10,12 @@ export interface PostMeta {
   date: string;
   readTime: string;
   slug: string;
+  description?: string;
+  tags?: string[];
+  category?: string;
+  image?: string;
+  likes?: number;
+  comments?: number;
 }
 
 export interface Post extends PostMeta {
@@ -51,6 +57,12 @@ export function getPostBySlug(slug: string): Post | null {
       readTime: data.readTime || '',
       slug: slug,
       content,
+      description: data.description || '',
+      tags: data.tags || [],
+      category: data.category || '',
+      image: data.image || '',
+      likes: data.likes || 0,
+      comments: data.comments || 0,
     };
   } catch (error) {
     console.error(`Error reading post ${slug}:`, error);
@@ -61,15 +73,22 @@ export function getPostBySlug(slug: string): Post | null {
 export function getAllPosts(): PostMeta[] {
   const slugs = getPostSlugs();
   const posts = slugs
-    .map((slug) => {
+    .map((slug): PostMeta | null => {
       const post = getPostBySlug(slug.replace(/\.mdx$/, ''));
       if (!post) return null;
-      return {
+      const meta: PostMeta = {
         title: post.title,
         date: post.date,
         readTime: post.readTime,
         slug: slug.replace(/\.mdx$/, ''),
+        description: post.description,
+        tags: post.tags,
+        category: post.category,
+        image: post.image,
+        likes: post.likes,
+        comments: post.comments,
       };
+      return meta;
     })
     .filter((post): post is PostMeta => post !== null);
   
@@ -81,4 +100,31 @@ export function getAllPosts(): PostMeta[] {
 export function getLatestPosts(count: number = 6): PostMeta[] {
   const allPosts = getAllPosts();
   return allPosts.slice(0, count);
+}
+
+export function getPostsByCategory(category: string): PostMeta[] {
+  const allPosts = getAllPosts();
+  return allPosts.filter(post => post.category === category);
+}
+
+export function getAllCategories(): string[] {
+  const allPosts = getAllPosts();
+  const categories = new Set<string>();
+  allPosts.forEach(post => {
+    if (post.category) {
+      categories.add(post.category);
+    }
+  });
+  return Array.from(categories);
+}
+
+export function getCategoryCounts(): Record<string, number> {
+  const allPosts = getAllPosts();
+  const counts: Record<string, number> = {};
+  allPosts.forEach(post => {
+    if (post.category) {
+      counts[post.category] = (counts[post.category] || 0) + 1;
+    }
+  });
+  return counts;
 }
