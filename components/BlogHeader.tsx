@@ -27,13 +27,13 @@ export default function BlogHeader() {
                 홈
               </Link>
               <Link
-                href="/posts?category=개발"
+                href="/?category=개발"
                 className="text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition-colors"
               >
                 개발
               </Link>
               <Link
-                href="/posts?category=일상"
+                href="/?category=일상"
                 className="text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition-colors"
               >
                 일상

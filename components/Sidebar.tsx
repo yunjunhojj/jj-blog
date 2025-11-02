@@ -1,9 +1,5 @@
 import Link from "next/link";
-import {
-  getLatestPosts,
-  getAllCategories,
-  getCategoryCounts,
-} from "@/lib/posts";
+import { getLatestPosts, getAllTags } from "@/lib/posts";
 import Image from "next/image";
 import LinkedInIcon from "@/icons/linkedin.svg";
 import GitHubIcon from "@/icons/github.svg";
@@ -11,8 +7,7 @@ import EmailIcon from "@/icons/email.svg";
 
 export default function Sidebar() {
   const recentPosts = getLatestPosts(4);
-  const categories = getAllCategories();
-  const categoryCounts = getCategoryCounts();
+  const tags = getAllTags();
 
   return (
     <aside className="space-y-8">
@@ -92,34 +87,22 @@ export default function Sidebar() {
         </Link>
       </div>
 
-      {/* Categories */}
+      {/* Tags */}
       <div className="bg-white dark:bg-gray-900 rounded-lg shadow-sm p-6 border border-gray-200 dark:border-gray-800">
         <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">
-          카테고리
+          태그
         </h3>
-        <ul className="space-y-2">
-          <li>
+        <div className="flex flex-wrap gap-2">
+          {tags.map((tag) => (
             <Link
-              href="/"
-              className="flex items-center justify-between text-sm text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              key={tag}
+              href={`/?tag=${encodeURIComponent(tag)}`}
+              className="px-3 py-1.5 text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
             >
-              <span>전체</span>
+              {tag}
             </Link>
-          </li>
-          {categories.map((category) => (
-            <li key={category}>
-              <Link
-                href={`/?category=${encodeURIComponent(category)}`}
-                className="flex items-center justify-between text-sm text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-              >
-                <span>{category}</span>
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {categoryCounts[category] || 0}
-                </span>
-              </Link>
-            </li>
           ))}
-        </ul>
+        </div>
       </div>
     </aside>
   );

@@ -128,3 +128,32 @@ export function getCategoryCounts(): Record<string, number> {
   });
   return counts;
 }
+
+export function getPostsByTag(tag: string): PostMeta[] {
+  const allPosts = getAllPosts();
+  return allPosts.filter(post => post.tags && post.tags.includes(tag));
+}
+
+export function getAllTags(): string[] {
+  const allPosts = getAllPosts();
+  const tags = new Set<string>();
+  allPosts.forEach(post => {
+    if (post.tags && Array.isArray(post.tags)) {
+      post.tags.forEach(tag => tags.add(tag));
+    }
+  });
+  return Array.from(tags).sort();
+}
+
+export function getTagCounts(): Record<string, number> {
+  const allPosts = getAllPosts();
+  const counts: Record<string, number> = {};
+  allPosts.forEach(post => {
+    if (post.tags && Array.isArray(post.tags)) {
+      post.tags.forEach(tag => {
+        counts[tag] = (counts[tag] || 0) + 1;
+      });
+    }
+  });
+  return counts;
+}

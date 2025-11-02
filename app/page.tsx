@@ -1,21 +1,26 @@
-import { getLatestPosts, getPostsByCategory } from "@/lib/posts";
+import { getLatestPosts, getPostsByCategory, getPostsByTag } from "@/lib/posts";
 import PostCard from "@/components/PostCard";
 import Sidebar from "@/components/Sidebar";
 import Link from "next/link";
 
 interface HomeProps {
-  searchParams: Promise<{ category?: string }>;
+  searchParams: Promise<{ category?: string; tag?: string }>;
 }
 
 export default async function Home({ searchParams }: HomeProps) {
   const params = await searchParams;
   const category = params?.category;
+  const tag = params?.tag;
 
   let posts;
   let title = "최신 포스트";
   let subtitle = "개발과 관련된 최신 글들을 만나보세요";
 
-  if (category) {
+  if (tag) {
+    posts = getPostsByTag(tag);
+    title = `#${tag} 태그`;
+    subtitle = `${tag} 태그가 포함된 포스트 ${posts.length}개`;
+  } else if (category) {
     posts = getPostsByCategory(category);
     title = `${category} 카테고리`;
     subtitle = `${category} 카테고리에 속한 포스트 ${posts.length}개`;
@@ -34,7 +39,7 @@ export default async function Home({ searchParams }: HomeProps) {
               <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
                 {title}
               </h2>
-              {category && (
+              {(category || tag) && (
                 <Link
                   href="/"
                   className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
@@ -49,7 +54,9 @@ export default async function Home({ searchParams }: HomeProps) {
           {posts.length === 0 ? (
             <div className="text-center py-12">
               <p className="text-gray-500 dark:text-gray-400 mb-4">
-                해당 카테고리에 포스트가 없습니다.
+                {tag 
+                  ? `해당 태그가 포함된 포스트가 없습니다.` 
+                  : `해당 카테고리에 포스트가 없습니다.`}
               </p>
               <Link
                 href="/"
