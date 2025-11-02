@@ -5,8 +5,9 @@ import {
   getCategoryCounts,
 } from "@/lib/posts";
 import Image from "next/image";
-import LinkedInIcon from "./icons/LinkedInIcon";
-import EmailIcon from "./icons/EmailIcon";
+import LinkedInIcon from "@/icons/linkedin.svg";
+import GitHubIcon from "@/icons/github.svg";
+import EmailIcon from "@/icons/email.svg";
 
 export default function Sidebar() {
   const recentPosts = getLatestPosts(4);
@@ -39,14 +40,23 @@ export default function Sidebar() {
               target="_blank"
               rel="noopener noreferrer"
             >
-              <LinkedInIcon />
+              <LinkedInIcon className="h-5 w-5" />
+            </a>
+            <a
+              href="https://github.com/yunjunhojj"
+              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+              aria-label="GitHub"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <GitHubIcon className="h-5 w-5" />
             </a>
             <a
               href="mailto:yunjunhojj@gmail.com"
               className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
               aria-label="Email"
             >
-              <EmailIcon />
+              <EmailIcon className="h-5 w-5" />
             </a>
           </div>
         </div>
