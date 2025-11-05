@@ -1,5 +1,4 @@
 import Image from "next/image";
-import Link from "next/link";
 import LinkedInIcon from "@/icons/linkedin.svg";
 import GitHubIcon from "@/icons/github.svg";
 import EmailIcon from "@/icons/email.svg";

@@ -13,6 +13,13 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  // Custom rules
+  {
+    files: ["components/ThemeToggle.tsx"],
+    rules: {
+      "@eslint-react/hooks-extra/no-direct-set-state-in-use-effect": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;
