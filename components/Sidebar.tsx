@@ -1,13 +1,16 @@
 import Link from "next/link";
 import { getLatestPosts, getAllTags } from "@/lib/posts";
+import { getAllInterviews } from "@/lib/interviews";
 import Image from "next/image";
 import LinkedInIcon from "@/icons/linkedin.svg";
 import GitHubIcon from "@/icons/github.svg";
 import EmailIcon from "@/icons/email.svg";
+import DailyInterview from "./DailyInterview";
 
 export default function Sidebar() {
   const recentPosts = getLatestPosts(4);
   const tags = getAllTags();
+  const allInterviews = getAllInterviews();
 
   return (
     <aside className="space-y-8">
@@ -56,6 +59,9 @@ export default function Sidebar() {
           </div>
         </div>
       </div>
+
+      {/* Daily Interview */}
+      <DailyInterview interviews={allInterviews} />
 
       {/* Recent Posts */}
       <div className="bg-white dark:bg-gray-900 rounded-lg shadow-sm p-6 border border-gray-200 dark:border-gray-800">
