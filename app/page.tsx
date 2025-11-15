@@ -54,8 +54,8 @@ export default async function Home({ searchParams }: HomeProps) {
           {posts.length === 0 ? (
             <div className="text-center py-12">
               <p className="text-gray-500 dark:text-gray-400 mb-4">
-                {tag 
-                  ? `해당 태그가 포함된 포스트가 없습니다.` 
+                {tag
+                  ? `해당 태그가 포함된 포스트가 없습니다.`
                   : `해당 카테고리에 포스트가 없습니다.`}
               </p>
               <Link
