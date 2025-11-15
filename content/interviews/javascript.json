@@ -1,0 +1,74 @@
+{
+  "interviews": [
+    {
+      "question": "JavaScript의 이벤트 루프(Event Loop)의 동작 방식을 설명해주세요.",
+      "answer": "JavaScript는 단일 스레드 기반 언어이지만, 이벤트 루프를 통해 비동기 작업을 효율적으로 처리합니다.\n\n동작 구조:\n1. Call Stack: 실행 중인 함수가 쌓이는 스택\n2. Web API: setTimeout, fetch 등 브라우저 비동기 작업 처리\n3. Callback Queue(Task Queue): 완료된 콜백이 대기\n4. Microtask Queue: Promise.then, MutationObserver 등이 대기\n\n이벤트 루프는 Call Stack이 비면 Microtask Queue를 우선 처리하고, 그 다음 Task Queue를 처리합니다.\n\n이 구조 덕분에 비동기 코드가 순차적 흐름처럼 동작할 수 있습니다.",
+      "category": "javascript",
+      "difficulty": "hard",
+      "tags": ["JavaScript", "Event Loop", "비동기", "Promise", "브라우저 동작"]
+    },
+    {
+      "question": "클로저(Closure)의 특징과 사용 사례를 설명해주세요.",
+      "answer": "클로저는 함수가 선언될 당시의 렉시컬 스코프를 기억하고, 외부 함수가 종료된 이후에도 그 변수에 접근할 수 있는 기능입니다.\n\n특징:\n- 데이터 은닉, 캡슐화 가능\n- 외부 함수 스코프에 대한 지속적인 접근\n- 상태 유지 가능\n\n사용 사례:\n- private 변수 구현\n- 함수 팩토리 생성\n- debounce/throttle 같은 고차 함수 구현\n\n클로저는 함수형 패턴에서 매우 핵심적인 개념입니다.",
+      "category": "javascript",
+      "difficulty": "medium",
+      "tags": ["JavaScript", "클로저", "스코프", "함수형"]
+    },
+    {
+      "question": "프로토타입 기반 상속(prototypal inheritance)이 어떻게 동작하는지 설명해주세요.",
+      "answer": "JavaScript는 클래스 기반이 아닌 프로토타입 기반 언어이며, 객체는 자신의 prototype을 참조하는 링크를 내부적으로 가지고 있습니다.\n\n동작 방식:\n1. 객체에서 프로퍼티 검색\n2. 없으면 [[Prototype]](부모 객체) 체인으로 이동\n3. 상위 객체까지 반복하여 검색\n\n이 구조를 '프로토타입 체인'이라고 하며, 모든 객체는 Object.prototype을 최종 상위로 갖습니다.\n\n클래스 문법도 결국 내부적으로 프로토타입 기반으로 동작합니다.",
+      "category": "javascript",
+      "difficulty": "hard",
+      "tags": ["JavaScript", "Prototype", "상속", "객체지향"]
+    },
+    {
+      "question": "this 바인딩 규칙을 설명해주세요.",
+      "answer": "JavaScript에서 this는 호출 방식에 따라 동적으로 결정됩니다.\n\n주요 규칙:\n1. 기본 바인딩: 전역 객체(window)\n2. 암시적 바인딩: obj.func() → obj\n3. 명시적 바인딩: call, apply, bind\n4. new 바인딩: new로 호출 시 새로운 객체에 바인딩\n5. arrow function: this가 lexical scope로 고정됨\n\nthis는 런타임에 결정되는 특징 때문에 혼동되기 쉬우므로 호출 컨텍스트를 명확히 이해해야 합니다.",
+      "category": "javascript",
+      "difficulty": "medium",
+      "tags": ["JavaScript", "this", "스코프", "컨텍스트"]
+    },
+    {
+      "question": "Promise의 상태 변화와 then/catch/finally의 동작 원리를 설명해주세요.",
+      "answer": "Promise는 pending → fulfilled 또는 rejected 상태로 이동합니다.\n\n동작 원리:\n- then: 성공 상태(fulfilled)일 때 실행\n- catch: 실패 상태(rejected)일 때 실행\n- finally: 상태와 상관없이 항상 실행\n\nPromise는 비동기 작업의 상태를 표현하고, then 체인을 통해 연속적인 비동기 제어 흐름을 제공합니다.\n\n또한 then과 catch는 새로운 Promise를 반환하여 체이닝 구조를 가능하게 만듭니다.",
+      "category": "javascript",
+      "difficulty": "medium",
+      "tags": ["JavaScript", "Promise", "비동기", "then"]
+    },
+    {
+      "question": "async/await가 Promise보다 가지는 장점과 내부 동작 구조를 설명해주세요.",
+      "answer": "async/await는 Promise 기반의 비동기 코드를 동기 코드처럼 작성할 수 있게 해줍니다.\n\n장점:\n- 가독성 향상\n- then 체인 제거\n- try/catch로 에러 핸들링 간단\n\n동작 구조:\n- async 함수는 자동으로 Promise를 반환\n- await는 Promise가 fulfilled/rejected 될 때까지 실행을 일시 중단\n- 내부적으로는 Generator + Promise 조합처럼 동작\n\n실제 엔진 수준에서는 await가 Promise의 then을 이용해 태스크를 재배치합니다.",
+      "category": "javascript",
+      "difficulty": "medium",
+      "tags": ["JavaScript", "async", "await", "Promise"]
+    },
+    {
+      "question": "JavaScript의 가비지 컬렉션(GC) 방식인 Mark-and-Sweep을 설명해주세요.",
+      "answer": "JavaScript 엔진은 Mark-and-Sweep 알고리즘을 사용하여 메모리를 관리합니다.\n\n과정:\n1. 루트 객체(window, 전역 변수 등)부터 시작\n2. 참조 가능한 객체를 'mark'\n3. 참조되지 않는 객체는 'sweep'하여 제거\n\n특징:\n- 순환 참조(circular reference)가 있어도 참조되지 않으면 제거됨\n- 직접 메모리 해제가 필요 없음\n\n이 방식의 이해는 메모리 누수 디버깅에 매우 중요합니다.",
+      "category": "javascript",
+      "difficulty": "hard",
+      "tags": ["JavaScript", "메모리", "가비지 컬렉션", "Mark and Sweep"]
+    },
+    {
+      "question": "모듈 시스템(CommonJS vs ES Modules)의 차이를 설명해주세요.",
+      "answer": "두 시스템 모두 모듈화를 제공하지만 동작 방식은 다릅니다.\n\nCommonJS:\n- Node.js 기본 방식\n- require() 동기 로딩\n- 실행 시점에 모듈 로딩\n\nES Modules:\n- 브라우저 + 최신 JS 표준\n- import/export 문법 사용\n- 정적 분석 가능 (tree-shaking 지원)\n- 비동기 로딩\n\n결론: ES Modules은 정적 구조로 최적화 친화적이고, CommonJS는 런타임 기반입니다.",
+      "category": "javascript",
+      "difficulty": "hard",
+      "tags": ["JavaScript", "모듈", "CommonJS", "ESM"]
+    },
+    {
+      "question": "이벤트 캡처링과 버블링의 차이와 이벤트 위임(Event Delegation)의 원리를 설명해주세요.",
+      "answer": "이벤트 흐름은 세 단계로 구성됩니다:\n1. 캡처링 단계: window → target 방향으로 내려감\n2. 타겟 단계\n3. 버블링 단계: target → window 방향으로 올라감\n\n이벤트 위임은 버블링을 활용하여 상위 요소가 하위 요소의 이벤트를 처리하는 기법입니다.\n\n장점:\n- 이벤트 핸들러 개수 줄임\n- 동적으로 추가되는 요소도 처리 가능\n- 성능 최적화 효과",
+      "category": "javascript",
+      "difficulty": "medium",
+      "tags": ["JavaScript", "이벤트", "버블링", "위임"]
+    },
+    {
+      "question": "Immutable 데이터 관리가 필요한 이유와 JavaScript에서 이를 구현하는 방법을 설명해주세요.",
+      "answer": "불변성(Immutability)은 값 변경 시 기존 데이터를 수정하지 않고 새로운 데이터를 생성하는 방식입니다.\n\n필요 이유:\n- 예측 가능한 상태 관리\n- 참조 비교를 통한 렌더링 최적화(React 등)\n- 사이드 이펙트 최소화\n\n구현 방법:\n- 객체/배열 spread 사용\n- Object.assign\n- Immutable.js, immer 같은 라이브러리 활용\n\n불변성은 복잡한 상태 관리에서 매우 중요한 패턴입니다.",
+      "category": "javascript",
+      "difficulty": "hard",
+      "tags": ["JavaScript", "Immutable", "상태관리"]
+    }
+  ]
+}

@@ -28,20 +28,20 @@ export default function DailyInterview({ interviews }: DailyInterviewProps) {
 
   const interview = currentInterview;
 
-  const difficultyColors = {
+  const difficultyColors: Record<Interview["difficulty"], string> = {
     easy: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
     medium:
       "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300",
     hard: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300",
   };
 
-  const difficultyLabels = {
+  const difficultyLabels: Record<Interview["difficulty"], string> = {
     easy: "쉬움",
     medium: "보통",
     hard: "어려움",
   };
 
-  const categoryLabels = {
+  const categoryLabels: Record<Interview["category"], string> = {
     frontend: "프론트엔드",
     backend: "백엔드",
     javascript: "JavaScript",

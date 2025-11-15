@@ -1,0 +1,74 @@
+{
+  "interviews": [
+    {
+      "question": "Flexbox에서 justify-content와 align-items의 차이를 설명해주세요.",
+      "answer": "Flexbox에서 justify-content는 주 축(main axis)을 기준으로 아이템을 배치하는 속성이고, align-items는 교차 축(cross axis)을 기준으로 아이템을 정렬하는 속성입니다.\n\n정리:\n- justify-content: row일 때 가로축, column일 때 세로축\n- align-items: row일 때 세로축, column일 때 가로축\n\n레이아웃 설계 시 축의 방향과 각 속성이 적용되는 기준을 명확하게 이해하는 것이 중요합니다.",
+      "category": "frontend",
+      "difficulty": "medium",
+      "tags": ["CSS", "Flexbox", "레이아웃"]
+    },
+    {
+      "question": "rem과 em의 차이는 무엇이며 언제 각각을 사용하면 좋나요?",
+      "answer": "em은 부모 요소의 font-size를 기준으로 계산되고, rem은 루트 요소(html)의 font-size를 기준으로 계산됩니다.\n\n차이:\n- em: 컴포넌트 내부에서 상대적 크기를 조절할 때 유리\n- rem: 전체 UI의 폰트/간격 등을 일관된 기준으로 유지할 때 유리\n\n실무에서는 기본 폰트 스케일링을 위해 rem을 주로 사용하고, 특정 요소 내부에서 상대적 크기를 조정해야 할 때 em을 사용합니다.",
+      "category": "frontend",
+      "difficulty": "medium",
+      "tags": ["CSS", "단위", "rem", "em"]
+    },
+    {
+      "question": "CSS 우선순위(Specificity)가 어떻게 계산되는지 설명해주세요.",
+      "answer": "CSS 우선순위는 선택자의 종류에 따라 점수처럼 계산됩니다.\n\n우선순위 규칙:\n1. !important\n2. 인라인 스타일 (예: style=\"...\")\n3. ID 선택자 (#id)\n4. Class, 속성 선택자, pseudo-class (.class, [type], :hover)\n5. 태그 선택자, pseudo-element (div, ::after)\n\n브라우저는 이 규칙을 기반으로 충돌하는 스타일 중 어떤 것을 적용할지 결정합니다.",
+      "category": "frontend",
+      "difficulty": "medium",
+      "tags": ["CSS", "Specificity", "우선순위"]
+    },
+    {
+      "question": "CSS Grid에서 fr 단위가 의미하는 바를 설명해주세요.",
+      "answer": "fr(fraction)은 Grid Container의 남은 가용 공간을 비율로 나누는 단위입니다. 픽셀이나 %, auto 등과 달리 콘텐츠 크기나 부모 크기가 고정되지 않아도 유연한 레이아웃 구성이 가능합니다.\n\n예시:\n- grid-template-columns: 1fr 2fr → 동일하지 않은 비율로 공간 배분\n- auto와 함께 사용하면 콘텐츠 우선/비율 우선 레이아웃 혼합 가능\n\nGrid의 핵심 장점 중 하나가 공간 자동 분배이기 때문에 fr 단위 이해는 필수입니다.",
+      "category": "frontend",
+      "difficulty": "medium",
+      "tags": ["CSS", "Grid", "fr단위"]
+    },
+    {
+      "question": "position: fixed와 sticky의 차이를 설명해주세요.",
+      "answer": "fixed는 viewport 기준으로 항상 같은 위치에 고정되는 반면, sticky는 스크롤 위치에 따라 relative처럼 동작하다가 특정 지점에 도달하면 고정됩니다.\n\n차이:\n- fixed: 화면에 붙음, 부모 스크롤 영역과 관계 없음\n- sticky: 부모 스크롤 컨테이너 내에서만 고정, threshold(top 등) 필요\n\nsticky는 헤더, 인덱스 네비게이션 등 스크롤 관련 UI에 자주 사용됩니다.",
+      "category": "frontend",
+      "difficulty": "medium",
+      "tags": ["CSS", "position", "sticky", "fixed"]
+    },
+    {
+      "question": "Reflow와 Repaint의 차이와 발생 조건을 설명해주세요.",
+      "answer": "Reflow는 요소의 레이아웃(크기, 위치)을 다시 계산해야 할 때 발생하며, Repaint는 시각적 표시 요소가 변경되지만 레이아웃 변경이 없는 경우 발생합니다.\n\nReflow 발생 예:\n- width, height 변경\n- DOM 구조 변경\n- 글꼴 크기 변경\n\nRepaint 발생 예:\n- background-color 변경\n- visibility 변경\n\nReflow는 비용이 크기 때문에 성능 최적화에서 가장 중요한 고려 요소입니다.",
+      "category": "frontend",
+      "difficulty": "hard",
+      "tags": ["CSS", "Reflow", "Repaint", "성능최적화"]
+    },
+    {
+      "question": "브라우저의 CSS 파싱 과정이 렌더링 성능에 어떤 영향을 주는지 설명해주세요.",
+      "answer": "CSS 파싱은 렌더링 과정에서 CSSOM 생성 단계로 포함되며, CSSOM이 완성되기 전까지 Render Tree가 생성되지 않습니다. 즉 CSS는 렌더링을 지연시키는 요소가 될 수 있습니다.\n\n영향:\n1. 외부 CSS는 다운로드가 완료될 때까지 렌더링이 지연됨\n2. 복잡한 선택자는 CSSOM 파싱 비용을 증가시킴\n3. @import 사용은 추가 네트워크 요청을 만들어 성능을 저하시킴\n\n따라서 CSS는 가능한 빨리 로드하고 선택자는 단순하게 유지하는 것이 성능에 유리합니다.",
+      "category": "frontend",
+      "difficulty": "hard",
+      "tags": ["CSS", "CSSOM", "브라우저 렌더링", "성능"]
+    },
+    {
+      "question": "CSS Selector가 복잡할수록 성능이 떨어지는 이유는 무엇인가요?",
+      "answer": "CSS Selector 매칭은 우측(가장 오른쪽) 선택자부터 좌측으로 탐색하는 방식(Right-to-left matching)으로 수행됩니다. 셀렉터가 복잡할수록 DOM 트리를 더 많이 탐색해야 하므로 비용이 증가합니다.\n\n예시:\n- div ul li a.active → 트리 전체를 거슬러 올라가며 조건 검증\n\n실무에서는 셀렉터를 짧고 명확하게 유지해 스타일 계산 비용을 줄이는 것이 좋습니다.",
+      "category": "frontend",
+      "difficulty": "hard",
+      "tags": ["CSS", "Selector", "성능최적화"]
+    },
+    {
+      "question": "GPU 가속이 일어나는 CSS 속성과 그 원리를 설명해주세요.",
+      "answer": "transform, opacity, filter 등의 일부 CSS 속성은 GPU 합성(compositing)을 사용하여 렌더링할 수 있습니다. GPU는 병렬 처리가 강하기 때문에 애니메이션 성능이 향상됩니다.\n\n특징:\n- 박스 모델 변경 없음 → Reflow 발생하지 않음\n- Paint 최소화 → 합성 단계에서 작업 수행\n- 부드러운 60fps 애니메이션 가능\n\n하지만 레이어가 너무 많아지면 GPU 메모리 부족으로 오히려 성능이 떨어질 수 있습니다.",
+      "category": "frontend",
+      "difficulty": "hard",
+      "tags": ["CSS", "GPU", "Composite", "애니메이션"]
+    },
+    {
+      "question": "Stacking Context가 생성되는 조건과 z-index 계산 방식의 변화를 설명해주세요.",
+      "answer": "Stacking Context는 요소들이 독립적인 z-index 계층을 갖도록 만드는 렌더링 컨텍스트입니다.\n\n생성 조건 예:\n- position이 relative/absolute/fixed이며 z-index 값이 존재\n- opacity < 1\n- transform 사용\n- filter 사용\n- will-change 지정\n\nStacking Context가 생성되면 해당 컨텍스트 내부의 z-index는 외부 요소와 비교되지 않고 독립적으로 계산됩니다. 이를 모르면 원하는 z-index 동작이 나오지 않는 문제가 발생할 수 있습니다.",
+      "category": "frontend",
+      "difficulty": "hard",
+      "tags": ["CSS", "Stacking Context", "z-index", "렌더링"]
+    }
+  ]
+}
