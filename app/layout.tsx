@@ -19,6 +19,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "JJ Blog",
   description: "React, TypeScript, 그리고 웹 개발에 관한 블로그입니다.",
+  verification: {
+    google: "ZTNwg35sbO8vUq-KLL5UymsED2ARP8DeULxfVmn4SdA",
+  },
 };
 
 export default function RootLayout({
