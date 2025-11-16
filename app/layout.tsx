@@ -4,6 +4,7 @@ import "./globals.css";
 import Footer from "@/components/Footer";
 import BlogHeader from "@/components/BlogHeader";
 import ThemeProvider from "@/components/ThemeProvider";
+import GoogleAnalytics from "@/components/GoogleAnalytics";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,6 +31,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <GoogleAnalytics />
         <ThemeProvider>
           <div className="min-h-screen bg-white dark:bg-gray-950">
             <BlogHeader />
