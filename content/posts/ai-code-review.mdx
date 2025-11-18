@@ -1,0 +1,237 @@
+---
+title: AI환경에 노출되기 (1) - AI Code Review
+date: 2025-11-17
+readTime: 12분
+description: Bitbucket PR을 자동으로 리뷰해주는 Gemini 2.5 Flash Lite 기반 CLI를 설계하고 구현한 경험을 공유합니다.
+tags: [AI, Code Review, Bitbucket, Gemini, TypeScript, Docker]
+category: 개발
+---
+
+# Bitbucket PR에 Gemini를 붙여본 기록
+
+## TL;DR
+
+- Bitbucket PR을 자동으로 리뷰해 줄 수 있는 Gemini 기반 CLI를 설계·구현
+- 1개의 오케스트레이터 클래스로 전체 플로우를 관리하고, 팩토리 패턴과 의존성 주입을 통해 느슨한 결합으로 구현
+- 리뷰 품질을 높이기 위해 diff 슬라이싱, JSON 응답 복구, 노이즈 필터링, 토큰/비용 모니터링을 추가
+
+## 왜 시작했나
+
+팀의 Bitbucket PR이 많아지면서 리뷰 대기열이 길어졌습니다. 개발팀 규모는 줄어들었지만, 업무의 양이 줄어들진 않았습니다.
+"PR을 올리면 기본적인 검증과 비용 가이드를 자동으로 받고 싶다"는 요구가 커졌고, Gemini를 활용해 자동 리뷰어를 만들기로 했습니다.
+목표는 "개발자가 PR을 올리면 1~2분 안에 전체 피드백과 인라인 코멘트, 예상 비용을 코멘트로 남기는 봇"이었습니다.
+
+초기에는 [이 링크](https://medium.com/tech-learnings/automating-code-reviews-with-genai-in-bitbucket-pipelines-cfc736485352)를 통해 아이디어를 참고하였습니다.
+
+## 아키텍처 설계
+
+`ApplicationFactory`는 모든 의존성을 생성하고 느슨하게 결합된 오케스트레이터를 반환한다.
+
+```typescript
+// ApplicationFactory.ts: 모든 의존성을 생성하고 느슨하게 결합된 오케스트레이터를 반환
+
+return new CodeReviewOrchestrator(
+  bitbucketClient,
+  geminiClient,
+  diffProcessor,
+  diffParser,
+  commentFormatter,
+  config
+);
+```
+
+- **config**: EnvironmentConfig가 필수 env를 검증하여 누락 시 애초에 실행이 막힘.
+- **http**: HttpClient가 리다이렉션과 401 오류를 공통 처리해 클라이언트 레이어를 단순화
+- **clients**: BitbucketClient/GeminiClient가 각 API별 책임을 명확히 나눠 모듈화.
+- **processors**: DiffProcessor가 용량 제한을, DiffParser가 파일/블록 단위 파싱
+- **formatters**: 리뷰 결과를 포맷팅하여 코멘트로 작성
+- **orchestrators**: CodeReviewOrchestrator가 전체 플로우만 관리
+
+## 리뷰 파이프라인 흐름
+
+오케스트레이터는 "Diff 수집 → Gemini 전체 리뷰 → Bitbucket 일반 코멘트 → JSON 기반 인라인 코멘트 → 토큰/비용 로그" 순으로 동작한다.
+리뷰의 종류는 두 가지로 나뉩니다.
+
+1. 전체 리뷰: 전체 코드를 리뷰하고, 코드 구조, 논리 오류, 성능 이슈 등을 코멘트로 작성하는 리뷰
+2. 인라인 리뷰: json 응답을 파싱하여 인라인 코멘트로 작성하는 리뷰
+
+```typescript
+// CodeReviewOrchestrator.ts: 리뷰 파이프라인 흐름
+
+const overallReviewResult = await this.geminiClient.generateReview(
+    processedDiff
+);
+
+const formattedComment = this.commentFormatter.format(
+    overallReviewResult.review,
+    this.config.get("GEMINI_REVIEW_MESSAGE") || "코드 리뷰를 진행합니다."
+);
+
+await this.bitbucketClient.postComment(formattedComment); // 전체 리뷰 코멘트 작성
+
+...
+
+for (const [filenameLine, content] of Object.entries(jsonReview)) {
+    if (!content || content.trim().length === 0) continue;
+
+    ...
+
+    await this.bitbucketClient.postInlineComment(
+        content.trim(),
+        filename,
+        line
+    ); // 인라인 코멘트 작성
+}
+```
+
+- JSON 리뷰는 "파일:라인" 키만 허용하고, 단순 설명/칭찬은 필터링하여 실제 이슈만 남긴다. (few-shot prompt를 통해 필터링)
+- 작성된 파일 수, 토큰 사용량을 로그로 남겨 운영 시 가시성을 확보했다.
+
+### Diff 슬라이싱과 용량 제한
+
+큰 PR의 경우 Gemini의 토큰 제한을 고려해 diff를 적절히 분할해야 합니다. `DiffProcessor`는 다음과 같은 전략을 사용합니다:
+
+- **파일 단위 분할**: 변경된 파일이 많을 경우, 파일별로 나누어 리뷰 요청
+- **블록 단위 분할**: 단일 파일이 너무 클 경우, 변경된 라인 범위를 기준으로 청크 단위로 분할
+- **용량 제한**: Gemini 모델의 최대 토큰 제한을 고려하여 각 요청의 크기를 제한
+
+이를 통해 대규모 PR도 안정적으로 리뷰할 수 있습니다.
+
+### 노이즈 필터링 전략
+
+AI가 생성하는 리뷰에는 때때로 단순한 설명이나 칭찬이 포함됩니다. 실제 개발에 도움이 되는 이슈만 남기기 위해 few-shot prompt를 활용합니다:
+
+- **Few-shot 예시 제공**: Prompt에 "이슈가 아닌 예시"와 "실제 이슈 예시"를 함께 제공
+- **키 형식 검증**: "파일명:라인번호" 형식만 허용하여 구조화된 응답 유도
+- **내용 필터링**: 빈 문자열이나 의미 없는 설명은 자동으로 제거
+
+## Gemini 연동에서 겪은 시행착오
+
+Gemini는 빠르지만 JSON을 100% 정확히 주지 않는 경우가 있었습니다. 이를 대비해 응답을 수선하는 `repairJson`을 구현했습니다. (추가로 모델도 2.0에서 2.5로 업그레이드하였습니다.)
+
+### JSON 응답 복구 전략
+
+Gemini가 때때로 마크다운 코드 블록으로 감싸거나, 주석을 추가하거나, 불완전한 JSON을 반환하는 경우가 있습니다. `repairJson`은 다음과 같은 정규화 작업을 수행합니다:
+
+```typescript
+// GeminiClient.ts: JSON 응답 수정
+
+const reviewText = response.candidates?.[0]?.content?.parts?.[0]?.text;
+
+...
+
+try {
+    parsedJson = JSON.parse(reviewText) as JsonReviewResponse; // JSON 파싱
+} catch {
+    const cleanedJson = this.repairJson(reviewText);
+    parsedJson = JSON.parse(cleanedJson) as JsonReviewResponse; // JSON 파싱 (수정된 JSON)
+}
+```
+
+`repairJson`의 주요 처리 내용:
+
+- 마크다운 코드 블록 제거 (`json ... `)
+- JSON 앞뒤의 설명 텍스트 제거
+- 불완전한 JSON 구조 보완 (닫히지 않은 중괄호, 따옴표 등)
+- 이스케이프 문자 정규화
+
+이를 통해 JSON 파싱 실패율을 크게 줄였습니다.
+
+### 토큰 및 비용 모니터링
+
+각 리뷰 요청마다 사용된 토큰 수와 예상 비용을 로깅합니다:
+
+- **입력/출력 토큰 추적**: Gemini API 응답에서 `usageMetadata`를 추출하여 기록
+- **비용 계산**: 모델별 토큰 가격을 적용하여 예상 비용 산출
+- **로그 형식**: `[파일명] 리뷰 완료 - 입력: X 토큰, 출력: Y 토큰, 예상 비용: $Z`
+
+이를 통해 운영 중 비용을 실시간으로 모니터링하고, 비용이 예상보다 높은 경우 조기 대응할 수 있습니다.
+
+## 배포 파이프라인과 운영 자동화
+
+위의 내용들을 기반으로 GCP Artifact Registry에 이미지를 빌드하고 배포했습니다.
+
+이제 각 프로젝트에서 컨테이너를 실행하기 위해 Bitbucket Pipelines에 예제 템플릿을 추가했습니다.
+
+### 왜 Cloud Run이 아닌 Docker 이미지로 배포했나
+
+초기에는 Cloud Run으로 배포하는 것도 고려했지만, 최종적으로는 Docker 이미지를 Artifact Registry에 저장하고 Bitbucket Pipelines에서 직접 실행하는 방식을 선택했습니다. 그 이유는 다음과 같습니다:
+
+1. **단순한 실행 모델**: Bitbucket Pipelines에서 `docker run` 한 줄로 실행 가능. Cloud Run 서비스 생성, 트리거 설정, API 호출 등 추가 설정이 불필요합니다.
+
+2. **비용 효율성**: PR마다 필요할 때만 컨테이너를 실행하고 종료. Cloud Run은 최소 인스턴스 유지 비용이나 콜드 스타트 대기 시간이 있지만, Docker 이미지는 실행 시간에만 리소스를 사용합니다.
+
+3. **빠른 실행**: Cloud Run 배포/트리거 오버헤드 없이 바로 실행되어 PR 리뷰 응답 시간이 단축됩니다.
+
+4. **독립성**: 외부 서비스(Cloud Run API) 의존성 없이 Bitbucket Pipelines 내에서 완전히 자체 실행 가능합니다.
+
+> [!NOTE]
+> Cloud Run으로 배포했을 때 장점도 있습니다.
+> 예를 들어, 에러 발생 시 로그를 쉽게 확인할 수 있습니다. 하지만 이번 프로젝트는 아주 작게 시작했기 때문에 단순히 실행하는 것으로 충분했습니다.
+
+### Bitbucket Pipelines 예제 템플릿
+
+```yaml
+- step:
+    name: Run Review Container
+    image: docker:24.0.5
+    services:
+      - docker
+    script:
+      - export IMAGE_PATH=$(echo "$GAR_REGION_HOST/$GCP_PROJECT_ID/$GAR_REPO/gemini-code-review:v1" | tr -d '\r\n')
+      - echo "$GCP_KEYFILE" | base64 -d | docker login -u _json_key --password-stdin "$GAR_REGION_HOST"
+      - docker run --rm \
+        -e GEMINI_API_KEY="$GEMINI_API_KEY" \
+        -e BITBUCKET_ACCESS_TOKEN="$BITBUCKET_ACCESS_TOKEN" \
+        -e BITBUCKET_REPO_SLUG="$BITBUCKET_REPO_SLUG" \
+        -e BITBUCKET_WORKSPACE="$BITBUCKET_WORKSPACE" \
+        -e BITBUCKET_PR_ID="$BITBUCKET_PR_ID" \
+        "$IMAGE_PATH"
+```
+
+### 필요한 환경 변수
+
+Bitbucket Pipelines에서 실행하기 위해 다음 환경 변수들을 Bitbucket 저장소 설정에 등록해야 합니다:
+
+| 이름                     | 설명                                      | 비고                                             |
+| ------------------------ | ----------------------------------------- | ------------------------------------------------ |
+| `GCP_KEYFILE`            | GCP 서비스 계정 키(JSON) Base64 인코딩 값 | `artifactregistry.reader` 권한 필요              |
+| `GEMINI_API_KEY`         | Gemini 모델 호출용 API 키                 | Google AI Studio 또는 Vertex AI Key              |
+| `BITBUCKET_ACCESS_TOKEN` | Bitbucket PR 코멘트 작성용 액세스 토큰    | `pullrequest:write`, `repository:read` 권한 필요 |
+
+**환경 변수 설정 방법:**
+
+1. Bitbucket 저장소 → Settings → Pipelines → Repository variables
+2. 각 환경 변수를 Secured로 설정하여 값이 로그에 노출되지 않도록 보호
+3. `GCP_KEYFILE`의 경우 서비스 계정 키 JSON 파일을 base64로 인코딩하여 설정
+
+## 실제 사용 결과
+
+프로젝트 적용 후 다음과 같은 결과를 얻었습니다:
+
+- **초기 검증 자동화**: 문법 오류, 명명 규칙 위반 등 기본적인 이슈를 PR 생성 직후 자동으로 발견
+- **개발자 심리적 부담 감소**: 반복적인 리뷰 피드백을 AI가 먼저 제공하여, 팀원들은 더 깊이 있는 논의에 집중 가능
+
+다만, AI 리뷰의 한계도 명확했습니다:
+
+- **도메인 지식 부족**: 비즈니스 로직의 정확성 판단은 여전히 사람의 리뷰가 필요
+- **컨텍스트 이해 한계**: 전체 프로젝트 맥락을 완전히 이해하지 못해 때때로 부적절한 제안을 하는 경우도 있음
+
+따라서 AI 리뷰는 "1차 필터" 역할을 하고, 최종 검증은 사람이 담당하는 하이브리드 모델이 효과적입니다.
+
+## 마무리 및 다음 단계
+
+이번 프로젝트에서 얻은 인사이트:
+
+- **검증 가능한 로깅**: 어떤 파일에 몇 개 코멘트를 남겼는지, 비용이 얼마인지 자동으로 찍히니 운영 피드백이 빨라졌습니다.
+- **개발 경험 개선**: "PR 올리면 Gemini가 먼저 본다"는 경험이 팀의 심리적 부담을 줄여줍니다.
+- **아키텍처의 중요성**: 팩토리 패턴과 의존성 주입을 통해 각 컴포넌트를 독립적으로 테스트하고 교체하기 쉬웠습니다.
+
+다음으로 계획하는 일:
+
+1. **Prompt 튜닝 A/B 테스트**: 다양한 prompt 버전을 테스트하여 리뷰 품질 개선
+2. **도메인별 커스터마이징**: 각 프로젝트의 특성에 맞는 Prompt 템플릿 제공
+3. **리뷰 피드백 학습**: 개발자가 수락/거부한 리뷰를 분석하여 prompt 개선에 반영
+4. **성능 최적화**: 대규모 PR 처리 시 병렬 처리 및 배치 최적화
+
+이 글이 AI를 어떻게 활용할 수 있는지 고민하는 분들께 작은 참고가 되면 좋겠습니다. 특히 "완벽한 AI 리뷰어"를 만들려는 것보다, "개발자를 돕는 도구"로 접근하는 것이 더 현실적이고 효과적입니다.
