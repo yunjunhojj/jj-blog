@@ -2,8 +2,24 @@ import fs from "fs";
 import path from "path";
 import matter from "gray-matter";
 import dayjs from "dayjs";
+import readingTime from "reading-time";
 
 const postsDirectory = path.join(process.cwd(), "content", "posts");
+
+function calculateReadTime(content: string): string {
+  const withoutCodeBlocks = content.replace(/```[\s\S]*?```/g, "");
+  const withoutInlineCode = withoutCodeBlocks.replace(/`[^`]+`/g, "");
+  const withoutLinks = withoutInlineCode.replace(
+    /\[([^\]]+)\]\([^\)]+\)/g,
+    "$1"
+  );
+  const withoutImages = withoutLinks.replace(/!\[([^\]]*)\]\([^\)]+\)/g, "");
+  const withoutHtml = withoutImages.replace(/<[^>]+>/g, "");
+
+  const stats = readingTime(withoutHtml);
+  const minutes = Math.max(1, Math.ceil(stats.minutes));
+  return `${minutes}분`;
+}
 
 export interface PostMeta {
   title: string;
@@ -47,10 +63,13 @@ export function getPostBySlug(slug: string): Post | null {
       }
     }
 
+    // readTime이 메타데이터에 없으면 자동 계산
+    const readTime = data.readTime || calculateReadTime(content);
+
     return {
       title: data.title || "",
       date: dateStr,
-      readTime: data.readTime || "",
+      readTime,
       slug: slug,
       content,
       description: data.description || "",
