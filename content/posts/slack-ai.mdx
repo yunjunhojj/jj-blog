@@ -1,0 +1,437 @@
+---
+title: AI환경에 노출되기 (2) - Slack에서 AI를 활용하기
+date: 2025-11-18
+readTime: 15분
+description: Google Gemini 2.0 Flash를 Slack에 연결해 에러 대응, 티켓 생성, 대화 요약을 자동화한 실제 구축 과정을 정리했습니다.
+tags: [AI, Slack, Gemini, Jira, Automation, TypeScript]
+category: 개발
+image: /thumbnail/slack-ai.png
+---
+
+# Slack에 AI 심어서 활용하기: 3가지 실전 활용 사례
+
+Slack은 팀의 메인 커뮤니케이션 허브지만, 알림과 로그가 끝없이 쌓이면 대응 속도가 떨어집니다. Google Gemini 2.0 Flash를 붙여 반복 작업을 자동화한 3가지 사례(에러 티켓, 대화 기반 티켓, 대화 요약)를 정리했습니다.
+
+> 아래 코드들은 실제 코드는 아니며, 예시를 위한 코드입니다.
+
+## TL;DR
+
+- Google Gemini 2.0 Flash를 Slack에 연결해 에러 대응, 티켓 생성, 대화 요약을 자동화한 실제 구축 과정을 정리했습니다.
+- 에러 대응: 에러 로그를 자동으로 AI가 분석 후 티켓으로 변환하고 Jira에 생성합니다.
+- 티켓 생성: 스레드 토론을 AI로 요약하여 티켓으로 변환하고 Jira에 생성합니다.
+- 대화 요약: 장문의 대화를 AI로 요약하여 회고 문서로 변환합니다.
+
+## 기술 스택
+
+- **언어**: TypeScript (Node.js 20+)
+- **프레임워크**: Slack Bolt Framework
+- **AI**: Google Gemini 2.0 Flash
+- **API**: Jira REST API v3
+- **검증**: Zod
+- **배포**: Google Cloud Run
+- **패키지 관리**: Yarn
+
+## 프로젝트 구조
+
+```
+ai-slack-bot/
+├── index.ts
+├── slack/
+│   ├── bot.ts
+│   ├── handlers.ts
+│   ├── commands.ts
+│   ├── events.ts
+│   └── messages.ts
+├── jira/
+│   ├── api.ts
+│   ├── adf.ts
+│   ├── fingerprint.ts
+│   └── types.ts
+├── shared/
+│   ├── ai.ts
+│   ├── schema.ts
+│   ├── routing.ts
+│   └── routing-config.ts
+└── scripts/
+```
+
+---
+
+## 1. 에러 로그 자동 티켓 생성
+
+### 문제 상황
+
+에러 Slack 알림을 보고 Jira 티켓을 만드는 수작업이 병목이었습니다. 서비스가 늘어날수록 에러를 체크하고 담당자를 할당하는 데 시간이 더 걸렸습니다.
+가끔은 까먹기도 합니다.
+
+### 해결 방법
+
+Slack 메시지에서 에러를 감지 → Gemini로 구조화 → 라우팅 → 중복 검증 → Jira 티켓 생성까지 전부 자동화했습니다.
+
+#### 1.1 에러 감지
+
+```typescript
+const ERROR_KEYWORDS = [
+  "error",
+  "exception",
+  "TypeError",
+  "ReferenceError",
+  "5xx",
+  "[SENTRY]",
+];
+
+function isErrorAlert(event: any): boolean {
+  const text = event.text?.toLowerCase() || "";
+  return ERROR_KEYWORDS.some((keyword) => text.includes(keyword));
+}
+```
+
+#### 1.2 AI 기반 에러 분석
+
+```typescript
+const SYSTEM = `
+너는 에러 알림을 분석해 Jira 티켓 초안을 **하나의 JSON 객체로만** 생성한다.
+반드시 JSON만 출력하고, JSON 외에는 아무것도 출력하지 말 것. 
+필드명은 영문 스키마를 따른다. 내용은 한글로 작성한다.
+
+규칙:
+- env 언급 없으면 prod로 가정
+- 심각도: prod 핵심기능 중단/결제/로그인 장애 → S1, prod 기능 저하 → S2, 나머지 → S3
+- area 추정: 프론트 오류 → "FE", 서버스택/DB/HTTP 5xx → "BE", 인프라/배포/네트워크 → "Infra"
+`;
+
+export async function structureWithGemini(
+  rawSlackText: string
+): Promise<{ draft: TicketDraft }> {
+  // PII 마스킹 (민감정보 제거)
+  const masked = maskPII(rawSlackText);
+  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const resp = await model.generateContent({
+    contents: [{ role: "user", parts: [{ text: SYSTEM + "\n" + prompt }] }],
+    generationConfig: { responseMimeType: "application/json" },
+  });
+  const parsed = JSON.parse(resp.response.text());
+  return {
+    draft: TicketDraftSchema.parse(parsed),
+  };
+}
+```
+
+#### 1.3 스마트 라우팅
+
+```typescript
+export const ROUTING = {
+  projects: [
+    {
+      match: { area: "FE", service: /web|frontend/i },
+      projectKey: "FE",
+      issueType: "버그",
+      defaultLabels: ["frontend"],
+    },
+    {
+      match: { area: "BE", service: /api|gateway|backend/i },
+      projectKey: "BE",
+      issueType: "버그",
+      defaultLabels: ["backend"],
+    },
+  ],
+  priorityMap: { S1: "Highest", S2: "High", S3: "Medium" },
+  assignees: [
+    {
+      match: { area: "FE", component: /auth|login/i },
+      assignee: "yunjunho-fe",
+    },
+    {
+      match: { area: "BE", component: /payment|billing/i },
+      assignee: "parkjaesu-be",
+    },
+  ],
+};
+```
+
+#### 1.4 중복 티켓 방지
+
+```typescript
+export function fingerprint(s: string): string {
+  const normalized = s
+    .replace(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+      "UUID"
+    )
+    .replace(/0x[0-9a-f]+/gi, "HEX")
+    .replace(/\b\d{10,}\b/g, "LONG_NUMBER");
+  return createHash("sha256").update(normalized).digest("hex").substring(0, 16);
+}
+
+const fp = fingerprint(
+  `${draft.service}|${draft.env}|${draft.title}|${masked}`
+);
+const existing = await findByFingerprint(route.projectKey, fp);
+if (existing) {
+  await addComment(
+    existing.key,
+    `추가 발생: ${new Date().toISOString()}\n원문(마스킹):\n${masked}`
+  );
+  return;
+}
+```
+
+#### 1.5 워크플로우
+
+1. 에러 감지
+2. PII 마스킹
+3. Gemini 분석
+4. 라우팅 결정
+5. Fingerprint 기반 중복 검사
+6. Jira 티켓 생성 혹은 기존 티켓 코멘트
+
+#### 1.6 효과
+
+- 티켓 생성 시간이 대폭 단축
+- 서술 형식이 일관돼 사후 분석이 쉬움
+- Fingerprint로 중복 티켓 문제 해소
+
+---
+
+## 2. 대화 내용 기반 티켓 생성
+
+### 문제 상황
+
+긴 스레드에 흩어진 요구사항을 티켓으로 옮기기 어렵고, 영문 템플릿에 한글 대화를 정리하는 작업도 번거로웠습니다.
+
+### 해결 방법
+
+스레드에서 `/create_issue {프로젝트키}`를 호출하면 대화 전체를 요약해 Jira 티켓으로 변환합니다.
+
+#### 2.1 사용 방법
+
+1. 티켓화할 스레드로 이동
+2. `/create_issue project-key` 입력
+3. 봇이 대화를 분석해 제목/본문을 자동 생성
+4. Jira 프로젝트에 Task 이슈 생성, `slack-thread` 라벨 자동 부여
+
+#### 2.2 AI 기반 티켓 생성
+
+```typescript
+const TICKET_CREATION_SYSTEM = `
+너는 Slack 스레드 대화를 분석하여 Jira 티켓의 제목과 내용을 생성하는 AI이다.
+주어진 대화 내용을 바탕으로 명확하고 실행 가능한 티켓을 작성해야 한다.
+
+**티켓 작성 규칙:**
+1. **제목**: 명확하고 간결하게 작성 (동사 시작 권장, 예: "사용자 로그인 기능 구현")
+2. **내용**: 다음 구조로 작성
+   - **배경**: 왜 이 작업이 필요한가?
+   - **요구사항**: 구체적으로 무엇을 해야 하는가?
+   - **기대 결과**: 완료 시 어떤 상태가 되어야 하는가?
+   - **참고사항**: 기술적 제약, 관련 링크 등
+
+**주의사항:**
+- 모든 내용은 한글로 작성
+- 불명확하거나 모호한 요구사항은 "확인 필요" 섹션에 별도 명시
+- 기술적 용어는 한글과 영문을 병기 (예: "응답시간(Response Time)")
+`;
+
+export async function generateTicketFromThread(
+  messages: string[]
+): Promise<{ title: string; description: string }> {
+  const conversationText = messages.join("\n---\n");
+  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const resp = await model.generateContent({
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: TICKET_CREATION_SYSTEM + "\n" + prompt }],
+      },
+    ],
+    generationConfig: { responseMimeType: "application/json" },
+  });
+  const parsed = JSON.parse(resp.response.text());
+  return {
+    title: parsed.title || "제목 없음",
+    description: parsed.description || "내용 없음",
+  };
+}
+```
+
+#### 2.3 예시
+
+```
+사용자A: 로그인 페이지가 너무 느려요
+사용자B: 네트워크 탭 확인해보니 API 응답이 3초 걸리네요
+사용자A: 최적화가 필요할 것 같아요
+/create_issue BE
+→ "로그인 API 응답 속도 최적화" 티켓 자동 생성
+```
+
+#### 2.4 효과
+
+- 대화를 그대로 옮기는 시간을 절약
+- 요구사항 누락을 줄이고 템플릿 일관성을 유지
+- 한글 대화를 그대로 처리해 지역화 부담이 없음
+
+---
+
+## 3. 대화 내용 요약
+
+### 문제 상황
+
+채널에 쌓인 대화가 많을수록 결정 사항 추적이 어렵고, 신규 팀원이 컨텍스트를 파악하기 힘듭니다. 회고 준비 시간도 길어집니다.
+
+### 해결 방법
+
+`요약 {날짜}` 명령으로 기간을 지정하면 해당 날짜부터 오늘까지의 메시지를 수집해 AI가 정리합니다.
+
+#### 3.1 사용 방법
+
+- `요약 2024-11-01`, `요약 2024/11/01`
+- `요약 11-01`, `요약 11/01`
+- `요약 7일전` 등 상대 날짜
+
+#### 3.2 AI 기반 요약
+
+```typescript
+const SUMMARY_SYSTEM = `
+너는 Slack 대화 내용을 분석하여 요약하는 AI이다.
+주어진 기간 동안의 메시지들을 읽고, 다음과 같은 구조로 요약해야 한다:
+1. **주요 주제**
+2. **중요 결정사항**
+3. **발생한 문제**
+4. **해결책 및 액션 아이템**
+5. **참고사항**
+요약은 한글로 작성하고, 불필요한 잡담은 제외한다.
+`;
+
+export async function summarizeMessages(
+  messages: string[]
+): Promise<{ summary: string }> {
+  if (messages.length === 0) {
+    return {
+      summary: "해당 기간에 메시지가 없습니다.",
+    };
+  }
+  const conversationText = messages.join("\n---\n");
+  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const resp = await model.generateContent({
+    contents: [
+      { role: "user", parts: [{ text: SUMMARY_SYSTEM + "\n" + prompt }] },
+    ],
+  });
+  return {
+    summary: resp.response.text(),
+  };
+}
+```
+
+#### 3.3 효과
+
+- 채널 맥락을 빠르게 파악하고 회고 준비 시간을 단축
+- 결정 사항과 액션 아이템을 분리해 누락을 방지
+- 신규 팀원의 온보딩 자료로도 활용 가능
+
+---
+
+## 기술적 하이라이트
+
+### 타입 안전성 (Zod)
+
+```typescript
+export const TicketDraftSchema = z.object({
+  service: z.string().default("unknown"),
+  area: z.enum(["FE", "BE", "Infra"]),
+  env: z.enum(["prod", "staging", "dev"]).default("prod"),
+  severity: z.enum(["S1", "S2", "S3"]),
+  title: z.string().min(4).max(180),
+  description: z.string().min(10),
+  stepsToRepro: z.array(z.string()).default([]),
+  probableCause: z.string().nullable().optional(),
+  labels: z.array(z.string()).default([]),
+  componentHint: z.string().nullable().optional(),
+  routingHint: z
+    .object({
+      projectKey: z.string().nullable().optional(),
+      issueType: z.string().nullable().optional(),
+    })
+    .default({}),
+});
+```
+
+### Jira ADF 포맷
+
+```typescript
+export function makeDescriptionADF(opts: {
+  description: string;
+  steps?: string[];
+  metaLines?: string[];
+}) {
+  const blocks: any[] = [];
+  if (opts.description) blocks.push(adfParagraph(opts.description));
+  if (opts.steps && opts.steps.length) {
+    blocks.push(adfParagraph("재현 절차:"));
+    blocks.push(adfBullet(opts.steps));
+  }
+  if (opts.metaLines && opts.metaLines.length) {
+    blocks.push(adfParagraph("메타:"));
+    opts.metaLines.forEach((m) => blocks.push(adfParagraph(m)));
+  }
+  return { version: 1, type: "doc", content: blocks };
+}
+```
+
+### 중복 이벤트 처리
+
+```typescript
+const processedEvents = new Set<string>();
+const EVENT_TTL = 10 * 60 * 1000;
+
+function isEventProcessed(eventTs: string): boolean {
+  if (processedEvents.has(eventTs)) {
+    return true;
+  }
+  processedEvents.add(eventTs);
+  setTimeout(() => {
+    processedEvents.delete(eventTs);
+  }, EVENT_TTL);
+  return false;
+}
+```
+
+---
+
+## 배포 및 운영
+
+- Google Cloud Run에 Event Subscriptions 모드로 배포
+- 메모리 1Gi, CPU 1 vCPU, 타임아웃 300초 기준
+- Slack App 이벤트: `message.channels`, `message.groups`, `message.im`
+- Request URL: `https://YOUR-SERVICE-URL.run.app/slack/events`
+
+### 주요 환경 변수
+
+```bash
+SLACK_BOT_TOKEN=xoxb-your-bot-token
+SLACK_SIGNING_SECRET=your-signing-secret
+GOOGLE_GENERATIVE_AI_API_KEY=your-gemini-api-key
+JIRA_BASE_URL=https://your-domain.atlassian.net
+JIRA_EMAIL=your-email@example.com
+JIRA_API_TOKEN=your-jira-api-token
+```
+
+---
+
+## 트러블슈팅
+
+1. **AI 응답 파싱 오류**: JSON 외 텍스트가 섞이면 백틱 제거, 트레일링 쉼표 제거 등 복구 로직으로 재파싱.
+2. **중복 이벤트**: 이벤트 타임스탬프를 Set으로 추적해 10분 내 동일 이벤트는 무시.
+3. **Jira API 에러**: 응답 본문을 파싱해 슬랙으로 바로 피드백, 원인 분석 시간을 절약.
+
+---
+
+## 마무리
+
+세 가지 기능은 독립적으로 동작하면서도 Slack 메시지를 실행 가능한 결과물로 전환해 줍니다.
+
+- 에러 로그 자동 티켓 생성: 반복 티켓 업무를 제거
+- 대화 기반 티켓 생성: 스레드에서 바로 업무화
+- 대화 요약: 긴 히스토리를 빠르게 파악
+
+1차적인 계획은 회사 구성원들에게 AI가 이런 것도 할 수 있다는 것을 알리고, 활용 사례를 공유하는 것입니다.
+추가로, AI 기반 자동화를 통해 개발 팀의 대응 속도와 일관성을 모두 끌어올릴 수 있었습니다. 이를 통해 향후 서비스별 라우팅 규칙을 더 정교화하고, Prompt A/B 테스트로 정확도를 높일 계획입니다.
