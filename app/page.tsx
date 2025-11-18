@@ -1,4 +1,9 @@
-import { getLatestPosts, getPostsByCategory, getPostsByTag } from "@/lib/posts";
+import {
+  getLatestPosts,
+  getPostsByCategory,
+  getPostsByTag,
+  PostMeta,
+} from "@/lib/posts";
 import PostCard from "@/components/PostCard";
 import Sidebar from "@/components/Sidebar";
 import Link from "next/link";
@@ -12,7 +17,7 @@ export default async function Home({ searchParams }: HomeProps) {
   const category = params?.category;
   const tag = params?.tag;
 
-  let posts;
+  let posts: PostMeta[] = [];
   let title = "최신 포스트";
   let subtitle = "개발과 관련된 최신 글들을 만나보세요";
 
@@ -77,8 +82,6 @@ export default async function Home({ searchParams }: HomeProps) {
                   tags={post.tags}
                   slug={post.slug}
                   image={post.image}
-                  likes={post.likes}
-                  comments={post.comments}
                 />
               ))}
             </div>
