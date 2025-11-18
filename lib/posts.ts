@@ -57,8 +57,6 @@ export function getPostBySlug(slug: string): Post | null {
       tags: data.tags || [],
       category: data.category || "",
       image: data.image || "",
-      likes: data.likes || 0,
-      comments: data.comments || 0,
     };
   } catch (error) {
     console.error(`Error reading post ${slug}:`, error);
@@ -81,8 +79,6 @@ export function getAllPosts(): PostMeta[] {
         tags: post.tags,
         category: post.category,
         image: post.image,
-        likes: post.likes,
-        comments: post.comments,
       };
       return meta;
     })
