@@ -1,15 +1,16 @@
-import { getPostBySlug, getAllPosts } from '@/lib/posts';
-import Link from 'next/link';
-import { remark } from 'remark';
-import remarkRehype from 'remark-rehype';
-import rehypeStringify from 'rehype-stringify';
-import rehypePrismPlus from 'rehype-prism-plus';
-import rehypeCodeTitles from 'rehype-code-titles';
-import 'prismjs/themes/prism-tomorrow.css';
+import { getPostBySlug, getAllPosts } from "@/lib/posts";
+import Link from "next/link";
+import { remark } from "remark";
+import remarkGfm from "remark-gfm";
+import remarkRehype from "remark-rehype";
+import rehypeStringify from "rehype-stringify";
+import rehypePrismPlus from "rehype-prism-plus";
+import rehypeCodeTitles from "rehype-code-titles";
+import "prismjs/themes/prism-tomorrow.css";
 
 export async function generateStaticParams() {
   const posts = getAllPosts();
-  
+
   return posts.map((post) => ({
     slug: post.slug,
   }));
@@ -26,9 +27,7 @@ export default async function PostPage({
   if (!post) {
     return (
       <>
-        <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-100">
-          Post not found
-        </h1>
+        <h1 className="text-gray-900 dark:text-gray-100">Post not found</h1>
         <Link
           href="/posts"
           className="mt-4 inline-block text-blue-600 hover:text-blue-700 dark:text-blue-400"
@@ -40,6 +39,7 @@ export default async function PostPage({
   }
 
   const processedContent = await remark()
+    .use(remarkGfm)
     .use(remarkRehype)
     .use(rehypeCodeTitles)
     .use(rehypePrismPlus)
@@ -48,7 +48,7 @@ export default async function PostPage({
   const contentHtml = processedContent.toString();
 
   return (
-    <>
+    <div className="mx-auto" style={{ maxWidth: "632px" }}>
       <Link
         href="/posts"
         className="mb-8 inline-block text-sm text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
@@ -60,9 +60,11 @@ export default async function PostPage({
         <h1 className="mb-2 text-4xl font-bold text-gray-900 dark:text-gray-100">
           {post.title}
         </h1>
-        
+
         <div className="mb-8 text-sm text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-800 pb-4">
-          <p>{post.date} · {post.readTime}</p>
+          <p>
+            {post.date} · {post.readTime}
+          </p>
         </div>
 
         <div
@@ -70,6 +72,6 @@ export default async function PostPage({
           dangerouslySetInnerHTML={{ __html: contentHtml }}
         />
       </article>
-    </>
+    </div>
   );
 }
