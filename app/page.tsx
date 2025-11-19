@@ -82,6 +82,7 @@ export default async function Home({ searchParams }: HomeProps) {
                   tags={post.tags}
                   slug={post.slug}
                   image={post.image}
+                  category={post.category}
                 />
               ))}
             </div>

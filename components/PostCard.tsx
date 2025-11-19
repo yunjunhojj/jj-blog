@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import dayjs from "dayjs";
+import { getDefaultImage } from "@/lib/defaultImages";
 
 export interface PostCardProps {
   title: string;
@@ -10,6 +11,7 @@ export interface PostCardProps {
   tags?: string[];
   slug: string;
   image?: string;
+  category?: string;
 }
 
 export default function PostCard({
@@ -20,8 +22,10 @@ export default function PostCard({
   tags = [],
   slug,
   image,
+  category,
 }: PostCardProps) {
   const formattedDate = dayjs(date).format("YYYY.MM.DD");
+  const defaultImageConfig = getDefaultImage(category);
 
   return (
     <article className="group bg-white dark:bg-gray-900 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-200 overflow-hidden border border-gray-200 dark:border-gray-800">
@@ -35,10 +39,10 @@ export default function PostCard({
               className="object-cover group-hover:scale-105 transition-transform duration-300"
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-800">
+            <div className={`w-full h-full flex flex-col items-center justify-center bg-gradient-to-br ${defaultImageConfig.gradient}`}>
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                className="h-12 w-12 text-gray-400 dark:text-gray-500"
+                className="h-16 w-16 text-white/80 mb-2"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -46,10 +50,11 @@ export default function PostCard({
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                  strokeWidth={1.5}
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
                 />
               </svg>
+              <p className="text-white/90 text-sm font-medium">{category || "포스트"}</p>
             </div>
           )}
         </div>
