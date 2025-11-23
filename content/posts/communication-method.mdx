@@ -41,19 +41,26 @@ HTTP는 가장 기본적인 통신 방식으로, 대부분의 CRUD 요청은 HTT
 ### React 예제 (fetch)
 
 ```typescript
+// GET - 데이터 조회
 const res = await fetch("/api/todos");
-const data = await res.json();
-```
+const todos = await res.json();
 
-### React 예제 (axios)
+// POST - 데이터 생성
+await fetch("/api/todos", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ title: "새 할일" }),
+});
 
-```typescript
-import axios from "axios";
+// PATCH - 데이터 수정
+await fetch(`/api/todos/${id}`, {
+  method: "PATCH",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ completed: true }),
+});
 
-const fetchTodos = async () => {
-  const { data } = await axios.get("/api/todos");
-  return data;
-};
+// DELETE - 데이터 삭제
+await fetch(`/api/todos/${id}`, { method: "DELETE" });
 ```
 
 ---
@@ -64,7 +71,7 @@ const fetchTodos = async () => {
 
 ### 언제 사용하면 좋은가?
 
-- 3~5초 단위의 "준실시간"이면 충분할 때
+- 3~5초 단위의 적당한 "실시간"이면 충분할 때
 - 대시보드 숫자 업데이트
 - 비동기 작업 상태 모니터링
 
@@ -132,37 +139,45 @@ Polling의 개선된 형태로, 서버가 새 데이터가 생길 때까지 요�
 ### React 예제
 
 ```typescript
-import { useEffect, useState } from "react";
-
 function LongPollingChat() {
-  const [messages, setMessages] = useState<string[]>([]);
-  const [lastId, setLastId] = useState("0");
+  const [messages, setMessages] = useState<Message[]>([]);
+  const lastIdRef = useRef("0");
+  const isActiveRef = useRef(true); // 연결이 유지되는지 확인하는 참조
 
   useEffect(() => {
     const poll = async () => {
-      try {
-        const res = await fetch(`/api/chat/long-poll?lastId=${lastId}`);
-        const { messages: newMessages } = await res.json();
+      if (!isActiveRef.current) return;
 
-        if (newMessages.length > 0) {
-          setMessages((prev) => [...prev, ...newMessages]);
-          setLastId(newMessages[newMessages.length - 1].id);
+      try {
+        // lastId 이후의 새 메시지를 요청 (서버가 대기)
+        const res = await fetch(
+          `/api/chat/long-poll?lastId=${lastIdRef.current}`
+        );
+        const data = await res.json();
+
+        if (data.messages?.length > 0) {
+          setMessages((prev) => [...prev, ...data.messages]);
+          lastIdRef.current = data.messages[data.messages.length - 1].id;
         }
       } catch (error) {
-        console.error("Long polling error:", error);
-      } finally {
-        // 응답을 받으면 즉시 다시 요청
-        poll();
+        console.error("Long polling 오류:", error);
       }
+
+      // 응답 받은 후 즉시 다음 요청 시작
+      poll();
     };
 
     poll();
-  }, [lastId]);
+
+    return () => {
+      isActiveRef.current = false;
+    };
+  }, []);
 
   return (
     <div>
-      {messages.map((msg, idx) => (
-        <div key={idx}>{msg.text}</div>
+      {messages.map((msg) => (
+        <div key={msg.id}>{msg.text}</div>
       ))}
     </div>
   );
@@ -197,14 +212,13 @@ function LongPollingChat() {
 ### React 예제
 
 ```typescript
-import { useEffect, useState, useRef } from "react";
-
 function WebSocketChat() {
-  const [messages, setMessages] = useState<string[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const wsRef = useRef<WebSocket | null>(null);
+  const wsRef = useRef<WebSocket | null>(null); // WebSocket 인스턴스를 참조
 
   useEffect(() => {
+    if (wsRef.current) return;
     const ws = new WebSocket("ws://localhost:4000");
     wsRef.current = ws;
 
@@ -214,7 +228,7 @@ function WebSocketChat() {
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      setMessages((prev) => [...prev, data.message]);
+      setMessages((prev) => [...prev, data]);
     };
 
     ws.onerror = (error) => {
@@ -241,7 +255,7 @@ function WebSocketChat() {
     <div>
       <div>
         {messages.map((msg, idx) => (
-          <div key={idx}>{msg}</div>
+          <div key={idx}>{msg.message}</div>
         ))}
       </div>
       <input
@@ -283,8 +297,6 @@ function WebSocketChat() {
 ### React 예제
 
 ```typescript
-import { useEffect, useState } from "react";
-
 function NotificationStream() {
   const [notifications, setNotifications] = useState<string[]>([]);
 
@@ -292,7 +304,8 @@ function NotificationStream() {
     const eventSource = new EventSource("/api/notifications/stream");
 
     eventSource.onmessage = (event) => {
-      setNotifications((prev) => [...prev, event.data]);
+      const data = JSON.parse(event.data);
+      setNotifications((prev) => [...prev, data.message]);
     };
 
     eventSource.onerror = (error) => {
@@ -330,68 +343,9 @@ function NotificationStream() {
 
 ---
 
-## 6. GraphQL Subscriptions
-
-GraphQL 환경에서 실시간 이벤트를 받고 싶을 때 사용합니다. 내부 구현은 WebSocket 또는 SSE 기반입니다.
-
-### 언제 사용하면 좋은가?
-
-- GraphQL을 사용하는 프로젝트
-- 실시간 데이터 업데이트가 필요한 경우
-- 타입 안전한 실시간 통신이 필요한 경우
-
-### React 예제 (Apollo Client)
-
-```typescript
-import { useSubscription } from "@apollo/client";
-import { gql } from "@apollo/client";
-
-const MESSAGE_SUBSCRIPTION = gql`
-  subscription OnMessageAdded {
-    messageAdded {
-      id
-      text
-      timestamp
-    }
-  }
-`;
-
-function GraphQLChat() {
-  const { data, loading } = useSubscription(MESSAGE_SUBSCRIPTION);
-
-  if (loading) return <div>로딩 중...</div>;
-
-  return <div>{data?.messageAdded && <div>{data.messageAdded.text}</div>}</div>;
-}
-```
-
----
-
 ## 실습 프로젝트: React + Node 서버 전체 구성
 
 이제 위 통신 방식들을 모두 직접 확인할 수 있는 간단한 React & Node 실습 환경을 구성해보겠습니다.
-
-### 프로젝트 구조
-
-```
-project-root
-├── server
-│   ├── package.json
-│   └── index.js
-└── frontend
-    ├── package.json
-    ├── vite.config.ts
-    └── src
-        ├── main.tsx
-        ├── App.tsx
-        ├── api.ts
-        └── features
-            ├── http/TodoList.tsx
-            ├── polling/DashboardStats.tsx
-            ├── longPolling/LongPollingChat.tsx
-            ├── websocket/WebSocketChat.tsx
-            └── sse/NotificationStream.tsx
-```
 
 ### Node 서버 코드 전체 (Express + WebSocket + SSE)
 
@@ -416,55 +370,78 @@ app.use(express.json());
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-const PORT = 4000;
-
 /** 1. HTTP (REST) */
-const todos = [
+let todos = [
   { id: 1, title: "첫 번째 할일", completed: false },
   { id: 2, title: "두 번째 할일", completed: true },
 ];
 
 app.get("/api/todos", (_, res) => res.json(todos));
+app.post("/api/todos", (req, res) => {
+  const todo = { id: Date.now(), title: req.body.title, completed: false };
+  todos.push(todo);
+  res.json(todo);
+});
+app.patch("/api/todos/:id", (req, res) => {
+  const todo = todos.find((t) => t.id === Number(req.params.id));
+  if (todo) {
+    Object.assign(todo, req.body);
+    res.json(todo);
+  } else {
+    res.status(404).json({ error: "Not found" });
+  }
+});
+app.delete("/api/todos/:id", (req, res) => {
+  todos = todos.filter((t) => t.id !== Number(req.params.id));
+  res.json({ success: true });
+});
 
-/** 2. Polling Stats */
-let userCount = 10;
-let orderCount = 3;
-
+/** 2. Polling */
+let stats = { userCount: 10, orderCount: 3 };
 setInterval(() => {
-  userCount += 1;
-  orderCount += 1;
+  stats.userCount += Math.floor(Math.random() * 5);
+  stats.orderCount += Math.floor(Math.random() * 3);
 }, 5000);
-
-app.get("/api/stats", (_, res) => res.json({ userCount, orderCount }));
+app.get("/api/stats", (_, res) => res.json(stats));
 
 /** 3. Long Polling */
-let messages = [{ id: "1", text: "안녕하세요!" }];
-let longPollingClients = [];
+let messages = [];
+let waitingClients = [];
 
 app.get("/api/chat/long-poll", (req, res) => {
-  const lastId = req.query.lastId;
-  const newMessages = lastId
-    ? messages.filter((m) => Number(m.id) > Number(lastId))
-    : messages;
+  const lastId = Number(req.query.lastId || 0);
+  const newMessages = messages.filter((m) => m.id > lastId);
 
-  if (newMessages.length > 0) return res.json({ messages: newMessages });
+  if (newMessages.length > 0) {
+    return res.json({ messages: newMessages });
+  }
 
-  const client = { res };
-  longPollingClients.push(client);
+  // 새 메시지가 없으면 대기
+  waitingClients.push(res);
 
+  // 30초 후 타임아웃
   setTimeout(() => {
-    longPollingClients = longPollingClients.filter((c) => c !== client);
-    res.json({ messages: [] });
+    const index = waitingClients.indexOf(res);
+    if (index > -1) {
+      waitingClients.splice(index, 1);
+      res.json({ messages: [] });
+    }
   }, 30000);
 });
 
 app.post("/api/chat/message", (req, res) => {
-  const id = String(messages.length + 1);
-  const message = { id, text: req.body.text };
+  const message = {
+    id: Date.now(),
+    text: req.body.text,
+    timestamp: Date.now(),
+  };
   messages.push(message);
 
-  longPollingClients.forEach((c) => c.res.json({ messages: [message] }));
-  longPollingClients = [];
+  // 대기 중인 모든 클라이언트에게 전송
+  waitingClients.forEach((client) => {
+    client.json({ messages: [message] });
+  });
+  waitingClients = [];
 
   res.json(message);
 });
@@ -481,40 +458,50 @@ app.get("/api/notifications/stream", (req, res) => {
 
   const clientId = Date.now();
   sseClients.push({ id: clientId, res });
-  res.write(`data: 연결됨\n\n`);
+
+  res.write(`data: ${JSON.stringify({ message: "연결됨" })}\n\n`);
 
   req.on("close", () => {
     sseClients = sseClients.filter((c) => c.id !== clientId);
   });
 });
 
+// 5초마다 모든 SSE 클라이언트에게 메시지 전송
 setInterval(() => {
-  const msg = `서버 시각: ${new Date().toISOString()}`;
-  sseClients.forEach((c) => c.res.write(`data: ${msg}\n\n`));
+  const notification = {
+    message: `서버 시각: ${new Date().toLocaleTimeString("ko-KR")}`,
+    timestamp: Date.now(),
+  };
+  sseClients.forEach((client) => {
+    client.res.write(`data: ${JSON.stringify(notification)}\n\n`);
+  });
 }, 5000);
 
 /** 5. WebSocket */
 wss.on("connection", (ws) => {
+  console.log("새 WebSocket 연결");
+
   ws.send(JSON.stringify({ type: "system", message: "환영합니다!" }));
 
   ws.on("message", (data) => {
+    const message = {
+      type: "chat",
+      message: data.toString(),
+      timestamp: Date.now(),
+    };
+
+    // 모든 연결된 클라이언트에게 브로드캐스트
     wss.clients.forEach((client) => {
-      if (client.readyState === 1) {
-        client.send(
-          JSON.stringify({
-            type: "chat",
-            message: data.toString(),
-            timestamp: Date.now(),
-          })
-        );
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(message));
       }
     });
   });
 });
 
-server.listen(PORT, () =>
-  console.log(`Server running on http://localhost:${PORT}`)
-);
+server.listen(4000, () => {
+  console.log("서버가 4000번 포트에서 실행 중입니다.");
+});
 ```
 
 ### React (Vite + TypeScript) UI 구성
@@ -603,5 +590,10 @@ yarn dev
 - **고성능 실시간 양방향** → WebSocket
 - **단방향 실시간 스트림** → SSE
 - **GraphQL 기반 실시간** → Subscriptions
+
+<br />
+
+전체 예제 코드와 실습 프로젝트는 [GitHub 저장소에서 확인할 수 있습니다.  
+https://github.com/yunjunhojj/communication-method](https://github.com/yunjunhojj/communication-method)
 
 또한 실제 실습 가능한 React + Node 서버 전체 프로젝트 코드를 제공해, 각 기술을 직접 테스트하며 체감할 수 있게 구성했습니다.
