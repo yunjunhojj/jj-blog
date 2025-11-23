@@ -1,0 +1,850 @@
+---
+title: "나만의 웹 브라우저 만들기 (4부) - JavaScript 실행 환경"
+date: 2025-11-11
+description: "JavaScript 인터프리터와 이벤트 루프를 구현합니다. DOM API를 바인딩하고 버튼 클릭 이벤트까지 처리해봅시다."
+tags: ["Browser", "JavaScript", "EventLoop", "DOM"]
+category: "개발"
+---
+
+# 나만의 웹 브라우저 만들기 (4부) - JavaScript 실행 환경
+
+> "브라우저는 `<script>` 태그 안의 JavaScript 코드를 어떻게 실행하고, DOM을 어떻게 조작할까?"
+
+## 시리즈 복습
+
+- [Part 1](/posts/mini-browser-part1): HTML/CSS 파서
+- [Part 2](/posts/mini-browser-part2): 레이아웃 & 페인팅
+- [Part 3](/posts/mini-browser-part3): 통합 렌더 파이프라인
+
+이제 마지막 퍼즐 조각, **JavaScript 실행 환경**을 만들 차례입니다!
+
+## JavaScript 인터프리터 구현
+
+### 목표와 제약사항
+
+완전한 JavaScript 파서를 만드는 것은 너무 복잡합니다. 대신:
+
+- 브라우저의 네이티브 `Function` 생성자 활용
+- DOM API, `console`, `setTimeout` 등을 주입
+- 이벤트 루프와 비동기 처리에 집중
+
+```typescript
+// packages/core/runtime/scripts/interpreter.ts
+import { EventLoop } from "../loop/eventLoop";
+
+export class JSInterpreter {
+  private globalEnv: Record<string, any> = {};
+  private eventLoop: EventLoop;
+
+  constructor(globalEnv: Record<string, any>, eventLoop: EventLoop) {
+    this.globalEnv = globalEnv;
+    this.eventLoop = eventLoop;
+  }
+
+  run(code: string): any {
+    try {
+      // globalEnv의 키를 함수 매개변수로, 값을 인자로 전달
+      const keys = Object.keys(this.globalEnv);
+      const values = Object.values(this.globalEnv);
+
+      // Function 생성자로 코드 실행
+      const fn = new Function(...keys, code);
+      return fn(...values);
+    } catch (error) {
+      console.error("Script execution error:", error);
+      throw error;
+    }
+  }
+
+  updateGlobals(newGlobals: Record<string, any>): void {
+    Object.assign(this.globalEnv, newGlobals);
+  }
+
+  // 비동기 API
+  setTimeout(fn: Function, ms: number): number {
+    return this.eventLoop.setTimeout(() => fn(), ms);
+  }
+
+  queueMicrotask(fn: Function): void {
+    this.eventLoop.queueMicrotask(() => fn());
+  }
+}
+```
+
+## DOM 바인딩 구현
+
+### createDOMBindings
+
+```typescript
+// packages/core/runtime/dom/bindings.ts
+import { DOMNode } from "../../html/parser";
+import { matchesSelector } from "../../style/matcher";
+import { findNode } from "../dom/utils";
+
+export function createDOMBindings(
+  root: DOMNode,
+  reflow: () => void
+): Record<string, any> {
+  let nodeIdCounter = 1000;
+
+  return {
+    document: {
+      // 요소 생성
+      createElement(tag: string): DOMNode {
+        return {
+          type: "element",
+          name: tag,
+          attrs: {},
+          children: [],
+          id: nodeIdCounter++,
+        };
+      },
+
+      // 텍스트 노드 생성
+      createTextNode(text: string): DOMNode {
+        return {
+          type: "text",
+          text,
+          id: nodeIdCounter++,
+        };
+      },
+
+      // 요소 추가
+      appendChild(child: DOMNode): void {
+        root.children = root.children || [];
+        root.children.push(child);
+        child.parent = root;
+        reflow(); // DOM 변경 시 리렌더링
+      },
+
+      // 선택자로 요소 찾기
+      querySelector(selector: string): DOMNode | null {
+        return findNode(root, (node) => {
+          return matchesSelector(node, selector);
+        });
+      },
+
+      // ID로 요소 찾기
+      getElementById(id: string): DOMNode | null {
+        return findNode(root, (node) => {
+          return node.attrs?.id === id;
+        });
+      },
+    },
+
+    // 콘솔 API
+    console: {
+      log(...args: any[]): void {
+        console.log("[Guest]", ...args);
+
+        // Canvas에 로그 표시 (선택사항)
+        const logNode: DOMNode = {
+          type: "element",
+          name: "div",
+          attrs: { class: "console-log" },
+          children: [
+            {
+              type: "text",
+              text: args.join(" "),
+            },
+          ],
+          computedStyle: {
+            background: "#f1f3f4",
+            padding: "8px",
+            marginBottom: "4px",
+            fontSize: "14px",
+            color: "#202124",
+          },
+        };
+
+        root.children = root.children || [];
+        root.children.push(logNode);
+        reflow();
+      },
+    },
+
+    // 경고창
+    alert(message: any): void {
+      console.log("[Alert]", message);
+
+      // Canvas에 alert 박스 표시
+      const alertNode: DOMNode = {
+        type: "element",
+        name: "div",
+        attrs: { class: "alert-box" },
+        children: [
+          {
+            type: "text",
+            text: String(message),
+          },
+        ],
+        computedStyle: {
+          background: "#fff3cd",
+          border: "2px solid #ffc107",
+          padding: "20px",
+          margin: "20px",
+          fontSize: "16px",
+          color: "#856404",
+        },
+      };
+
+      root.children = root.children || [];
+      root.children.push(alertNode);
+      reflow();
+    },
+  };
+}
+```
+
+### DOM 탐색 유틸리티
+
+```typescript
+// packages/core/runtime/dom/utils.ts
+
+import { DOMNode } from "../../html/parser";
+
+export function findNode(
+  node: DOMNode,
+  predicate: (node: DOMNode) => boolean
+): DOMNode | null {
+  if (predicate(node)) {
+    return node;
+  }
+
+  if (node.children) {
+    for (const child of node.children) {
+      const found = findNode(child, predicate);
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
+export function matchesSelector(node: DOMNode, selector: string): boolean {
+  if (selector.startsWith("#")) {
+    return node.attrs?.id === selector.slice(1);
+  }
+  if (selector.startsWith(".")) {
+    const className = selector.slice(1);
+    return node.attrs?.class?.split(" ").includes(className) || false;
+  }
+  return node.name === selector;
+}
+```
+
+## 이벤트 루프 구현
+
+### 브라우저 이벤트 루프 구조
+
+```
+┌───────────────────────────┐
+│   Macro Task Queue        │
+│   - setTimeout            │
+│   - setInterval           │
+│   - I/O                   │
+└───────────────────────────┘
+         ↓
+┌───────────────────────────┐
+│   Micro Task Queue        │
+│   - Promise.then          │
+│   - queueMicrotask        │
+└───────────────────────────┘
+         ↓
+┌───────────────────────────┐
+│   Render Step             │
+│   - requestAnimationFrame │
+│   - Layout                │
+│   - Paint                 │
+└───────────────────────────┘
+```
+
+### EventLoop 클래스
+
+```typescript
+// packages/core/runtime/loop/eventLoop.ts
+
+type Task = () => void;
+
+export class EventLoop {
+  private macroQueue: Task[] = [];
+  private microQueue: Task[] = [];
+  private rafCallbacks: Task[] = [];
+  private timers: Map<number, NodeJS.Timeout> = new Map();
+  private timerIdCounter = 1;
+
+  // setTimeout 구현
+  setTimeout(fn: Task, ms: number): number {
+    const id = this.timerIdCounter++;
+
+    const timer = setTimeout(() => {
+      this.macroQueue.push(fn);
+      this.timers.delete(id);
+      this.run();
+    }, ms);
+
+    this.timers.set(id, timer);
+    return id;
+  }
+
+  // clearTimeout 구현
+  clearTimeout(id: number): void {
+    const timer = this.timers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      this.timers.delete(id);
+    }
+  }
+
+  // setInterval 구현
+  setInterval(fn: Task, ms: number): number {
+    const id = this.timerIdCounter++;
+
+    const timer = setInterval(() => {
+      this.macroQueue.push(fn);
+      this.run();
+    }, ms);
+
+    this.timers.set(id, timer);
+    return id;
+  }
+
+  // clearInterval 구현
+  clearInterval(id: number): void {
+    this.clearTimeout(id);
+  }
+
+  // queueMicrotask 구현
+  queueMicrotask(fn: Task): void {
+    this.microQueue.push(fn);
+    this.run();
+  }
+
+  // requestAnimationFrame 구현
+  requestAnimationFrame(fn: Task): void {
+    this.rafCallbacks.push(fn);
+    this.run();
+  }
+
+  // 이벤트 루프 실행
+  private async run(): Promise<void> {
+    // 1. 매크로 태스크 하나 실행
+    const macro = this.macroQueue.shift();
+    if (macro) {
+      try {
+        macro();
+      } catch (error) {
+        console.error("Macro task error:", error);
+      }
+    }
+
+    // 2. 모든 마이크로 태스크 처리
+    while (this.microQueue.length > 0) {
+      const micro = this.microQueue.shift();
+      if (micro) {
+        try {
+          micro();
+        } catch (error) {
+          console.error("Micro task error:", error);
+        }
+      }
+    }
+
+    // 3. 렌더 스텝 (requestAnimationFrame)
+    if (this.rafCallbacks.length > 0) {
+      // 다음 프레임까지 대기 (60fps 시뮬레이션)
+      await new Promise((resolve) => setTimeout(resolve, 16));
+
+      const callbacks = [...this.rafCallbacks];
+      this.rafCallbacks = [];
+
+      for (const cb of callbacks) {
+        try {
+          cb();
+        } catch (error) {
+          console.error("RAF error:", error);
+        }
+      }
+    }
+  }
+}
+```
+
+## 이벤트 시스템
+
+### 이벤트 리스너 등록
+
+```typescript
+// packages/core/runtime/events/dispatcher.ts
+
+interface EventHandler {
+  type: string;
+  handler: Function;
+}
+
+const eventHandlers = new Map<string, EventHandler[]>();
+
+export function addEventListener(
+  nodeId: string,
+  eventType: string,
+  handler: Function
+): void {
+  if (!eventHandlers.has(nodeId)) {
+    eventHandlers.set(nodeId, []);
+  }
+
+  eventHandlers.get(nodeId)!.push({ type: eventType, handler });
+}
+
+export function triggerEvent(nodeId: string, eventType: string): void {
+  const handlers = eventHandlers.get(nodeId);
+  if (!handlers) return;
+
+  for (const { type, handler } of handlers) {
+    if (type === eventType) {
+      try {
+        handler();
+      } catch (error) {
+        console.error("Event handler error:", error);
+      }
+    }
+  }
+}
+```
+
+## Canvas 클릭 이벤트 처리
+
+### 클릭 위치 → LayoutBox 매핑
+
+```typescript
+// packages/apps/gui/part4.ts
+import { LayoutBox } from "../../core/layout/types";
+import { renderPage } from "../../core/render";
+import {
+  triggerEvent,
+  addEventListener,
+} from "../../core/runtime/events/dispatcher";
+import { DOMNode } from "../../core/html/parser";
+import { findNode } from "../../core/runtime/dom/utils";
+import { parseCSS } from "../../core/css/parser";
+import { applyStyles } from "../../core/style/resolver";
+import { layout } from "../../core/layout/engine";
+import { paint } from "../../core/paint/painter";
+import { loadResources } from "../../core/utils/loadResources";
+import { EventLoop } from "../../core/runtime/loop/eventLoop";
+
+const eventLoop = new EventLoop();
+
+function findBoxAtPosition(
+  box: LayoutBox,
+  x: number,
+  y: number
+): LayoutBox | null {
+  // 자식부터 검사 (z-index 순서)
+  for (let i = box.children.length - 1; i >= 0; i--) {
+    const child = box.children[i];
+    const found = findBoxAtPosition(child, x, y);
+    if (found) return found;
+  }
+
+  // 현재 박스가 클릭 영역 안에 있는지 확인
+  if (
+    x >= box.x &&
+    x <= box.x + box.width &&
+    y >= box.y &&
+    y <= box.y + box.height
+  ) {
+    return box;
+  }
+
+  return null;
+}
+
+async function main() {
+  const canvas = document.getElementById("screen") as HTMLCanvasElement;
+  if (!canvas) {
+    console.error("Canvas element not found");
+    return;
+  }
+
+  const ctx = canvas.getContext("2d")!;
+
+  // Canvas의 CSS 크기
+  const cssWidth = canvas.clientWidth || window.innerWidth;
+  const cssHeight = canvas.clientHeight || window.innerHeight;
+
+  // HiDPI 대응: 실제 해상도 설정
+  const pixelRatio = window.devicePixelRatio || 1;
+  canvas.width = cssWidth * pixelRatio;
+  canvas.height = cssHeight * pixelRatio;
+
+  // CSS 규칙 로드 및 파싱 (초기 렌더링 후에 사용)
+  let cssRules = [] as ReturnType<typeof parseCSS>;
+
+  // 페이지 렌더링 및 DOM, layoutTree 저장
+  const { dom, layoutTree: initialLayoutTree } = await renderPage({
+    htmlUrl: "/part4.html",
+    cssUrl: "/part3.css",
+    ctx,
+    viewport: { width: cssWidth, height: cssHeight },
+  });
+
+  // 이벤트 루프 실행 및 테스트
+  console.log("이벤트 루프 실행 시작");
+
+  eventLoop.setTimeout(() => {
+    console.log("매크로 태스크 실행 완료 - setTimeout");
+  }, 0);
+
+  eventLoop.queueMicrotask(() => {
+    console.log("마이크로 태스크 실행 완료");
+  });
+
+  eventLoop.requestAnimationFrame(() => {
+    console.log("requestAnimationFrame 실행 완료");
+  });
+
+  let count = 0;
+  const intervalId = eventLoop.setInterval(() => {
+    console.log("setInterval 실행 완료");
+
+    count++;
+    if (count === 5) {
+      eventLoop.clearInterval(intervalId);
+      console.log("setInterval 종료");
+    }
+  }, 1000);
+
+  eventLoop.setTimeout(() => {
+    console.log("setTimeout 실행 완료");
+  }, 1000);
+
+  // CSS 규칙 로드 및 파싱 (리렌더링용)
+  const { cssText } = await loadResources("/part4.html", "/part3.css");
+  cssRules = parseCSS(cssText);
+
+  // 리렌더링 함수
+  let currentLayoutTree = initialLayoutTree;
+  const reflow = () => {
+    // 스타일 재적용
+    applyStyles(dom, cssRules);
+
+    // 레이아웃 재계산
+    currentLayoutTree = layout(
+      dom,
+      { width: cssWidth, height: cssHeight },
+      ctx
+    );
+
+    // 페인팅
+    paint(currentLayoutTree, { ctx, pixelRatio });
+  };
+
+  // 버튼 클릭 이벤트 핸들러 등록
+  const btnNode = findNode(dom, (node) => node.attrs?.id === "btn");
+  if (btnNode && btnNode.id) {
+    // 버튼 클릭 이벤트 핸들러 등록
+    const handleButtonClick = () => {
+      console.log("Button clicked! - 직접 만든 이벤트 핸들러");
+
+      // DOM 조작 - output 노드에 클릭 표시 태그 추가
+      const outputNode = findNode(dom, (node) => node.attrs?.id === "output");
+      if (outputNode) {
+        // 클릭 시간 표시
+        const clickTime = new Date().toLocaleTimeString();
+        const pNode: DOMNode = {
+          type: "element",
+          name: "p",
+          attrs: {},
+          children: [
+            {
+              type: "text",
+              text: `클릭됨 - ${clickTime}`,
+            },
+          ],
+        };
+        if (!outputNode.children) {
+          outputNode.children = [];
+        }
+        outputNode.children.push(pNode);
+
+        // 리렌더링
+        reflow();
+        console.log("DOM 업데이트 및 리렌더링 완료");
+      }
+    };
+
+    // 이벤트 시스템에 핸들러 등록 (nodeId를 문자열로 변환)
+    addEventListener(String(btnNode.id), "click", handleButtonClick);
+  }
+
+  // 클릭 이벤트 핸들러
+  canvas.addEventListener("click", (event: MouseEvent) => {
+    // Canvas의 bounding rect를 기준으로 클릭 좌표 계산
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    // 클릭된 박스 찾기 (최신 layoutTree 사용)
+    const clickedBox = findBoxAtPosition(currentLayoutTree, x, y);
+
+    if (clickedBox) {
+      console.log("클릭된 요소:", {
+        nodeId: clickedBox.nodeId,
+        nodeType: clickedBox.nodeType,
+        tagName: clickedBox.tagName,
+        textContent: clickedBox.textContent,
+        position: { x: clickedBox.x, y: clickedBox.y },
+        size: { width: clickedBox.width, height: clickedBox.height },
+      });
+
+      // 버튼인 경우 이벤트 트리거
+      if (clickedBox.tagName === "button") {
+        triggerEvent(String(clickedBox.nodeId), "click");
+      }
+    }
+  });
+}
+
+main().catch(console.error);
+```
+
+## 실전 데모
+
+### part4.html
+
+```html
+<!-- packages/apps/gui/part4.html -->
+<!DOCTYPE html>
+<html>
+  <body>
+    <div id="main">
+      <h1>Event Loop Demo</h1>
+      <button id="btn">Click Me</button>
+      <div id="output"></div>
+    </div>
+  </body>
+</html>
+```
+
+packages/apps/gui/index.html 에서 script 태그를 수정해서 part4.ts 파일을 실행합니다.
+
+```html
+<!-- part3를 part4로 변경 그 외에는 유지 -->
+<script type="module" src="/part4.ts"></script>
+```
+
+### 실행 순서
+
+```
+이벤트 루프 실행 시작
+마이크로 태스크 실행 완료
+매크로 태스크 실행 완료 - setTimeout
+requestAnimationFrame 실행 완료
+setInterval 실행 완료
+setTimeout 실행 완료
+setInterval 실행 완료 - 4번실행 (위에서 한번 실행되었기 때문에, 총 5번 실행됨)
+setInterval 종료
+```
+
+## 이벤트 루프 작동 과정
+
+위 코드의 실행 순서를 단계별로 분석해보겠습니다.
+
+### 실행 순서 분석
+
+```javascript
+// 1. 동기 코드 실행
+console.log("이벤트 루프 실행 시작");
+
+// 2. 비동기 작업 등록 (아직 실행되지 않음)
+eventLoop.setTimeout(() => {
+  console.log("매크로 태스크 실행 완료 - setTimeout");
+}, 0);
+
+eventLoop.queueMicrotask(() => {
+  console.log("마이크로 태스크 실행 완료");
+});
+
+eventLoop.requestAnimationFrame(() => {
+  console.log("requestAnimationFrame 실행 완료");
+});
+```
+
+**실제 실행 흐름**:
+
+1. **동기 코드 실행**: `console.log("이벤트 루프 실행 시작")`이 즉시 실행됩니다.
+2. **비동기 작업 등록**: `setTimeout`, `queueMicrotask`, `requestAnimationFrame`은 큐에 등록만 되고 아직 실행되지 않습니다.
+3. **이벤트 루프 시작**: `eventLoop.run()`이 호출되면 다음 순서로 실행됩니다:
+   - **마이크로 태스크 큐** 처리 (모든 마이크로 태스크를 한 번에)
+   - **매크로 태스크 큐** 처리 (한 번에 하나씩)
+   - **렌더 스텝** 처리 (`requestAnimationFrame` 콜백)
+
+### 이벤트 루프의 정확한 순서
+
+```
+┌─────────────────────┐
+│   동기 코드 실행    │ ← 즉시 실행
+└─────────────────────┘
+         ↓
+┌─────────────────────┐
+│  마이크로 태스크 큐  │ ← Promise.then, queueMicrotask
+│  (모두 처리)        │
+└─────────────────────┘
+         ↓
+┌─────────────────────┐
+│  매크로 태스크 큐    │ ← setTimeout, setInterval
+│  (하나씩 처리)       │
+└─────────────────────┘
+         ↓
+┌─────────────────────┐
+│  렌더 스텝          │ ← requestAnimationFrame
+│  (레이아웃/페인팅)   │
+└─────────────────────┘
+         ↓
+    (반복)
+```
+
+**핵심 포인트**:
+
+- 마이크로 태스크는 매크로 태스크보다 **항상 먼저** 실행됩니다.
+- 매크로 태스크는 한 번에 하나씩만 처리하고, 각 매크로 태스크 후에 다시 마이크로 태스크를 확인합니다.
+- 렌더 스텝은 매크로 태스크 처리 후 실행됩니다.
+
+## 핵심 개념 정리
+
+### 1. JavaScript 실행 환경
+
+우리가 구현한 `JSInterpreter`는 다음과 같은 특징을 가집니다:
+
+- **Function 생성자 활용**: 완전한 JavaScript 파서를 만들지 않고, 브라우저의 네이티브 `Function` 생성자를 활용하여 코드를 실행합니다.
+- **전역 환경 주입**: `document`, `console`, `alert` 등의 API를 전역 환경에 주입하여 JavaScript 코드에서 사용할 수 있게 합니다.
+- **스코프 격리**: 각 스크립트는 독립적인 전역 환경에서 실행되어 서로 간섭하지 않습니다.
+
+### 2. DOM API의 실제 동작
+
+```typescript
+// createElement: 메모리에만 노드 생성 (아직 DOM에 추가되지 않음)
+const div = document.createElement("div");
+
+// appendChild: DOM 트리에 추가 → Reflow 발생
+document.body.appendChild(div); // 이 시점에 레이아웃 재계산
+
+// querySelector: DOM 트리를 순회하여 요소 검색
+const element = document.querySelector("#myId");
+```
+
+**성능 고려사항**:
+
+- `createElement`는 가벼운 작업입니다 (메모리 할당만).
+- `appendChild`는 **무거운 작업**입니다 (Reflow 발생).
+- `querySelector`는 트리 순회 비용이 있습니다 (O(n)).
+
+### 3. Reflow/Repaint 최적화
+
+DOM을 조작할 때마다 Reflow가 발생하면 성능이 저하됩니다. `requestAnimationFrame`을 사용하면:
+
+- **브라우저 렌더링 사이클에 맞춰 실행**: 60fps를 유지하면서 최적의 타이밍에 실행됩니다.
+- **불필요한 Reflow 방지**: 여러 DOM 변경을 한 프레임에 모아서 처리할 수 있습니다.
+- **부드러운 애니메이션**: 렌더링 사이클과 동기화되어 끊김 없는 애니메이션이 가능합니다.
+
+```javascript
+// 나쁜 예: 매번 Reflow 발생
+element.style.width = "100px";
+element.style.height = "100px";
+element.style.backgroundColor = "red";
+
+// 좋은 예: requestAnimationFrame으로 배치 처리
+requestAnimationFrame(() => {
+  element.style.width = "100px";
+  element.style.height = "100px";
+  element.style.backgroundColor = "red";
+});
+```
+
+## 실전 성능 최적화 팁
+
+### 1. Debounce와 Throttle
+
+**Debounce**: 연속된 호출 중 마지막 호출만 실행합니다. 검색 입력, 창 크기 조정 등에 유용합니다.
+
+```javascript
+// Debounce: 마지막 호출 후 일정 시간이 지나면 실행
+function debounce(fn, delay) {
+  let timeoutId;
+  return function (...args) {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn(...args), delay);
+  };
+}
+
+// 사용 예시
+const handleSearch = debounce((query) => {
+  console.log("검색:", query);
+}, 300);
+```
+
+**Throttle**: 일정 시간마다 한 번만 실행합니다. 스크롤 이벤트, 마우스 이동 등에 유용합니다.
+
+```javascript
+// Throttle: 일정 시간마다 한 번만 실행
+function throttle(fn, delay) {
+  let lastCall = 0;
+  return function (...args) {
+    const now = Date.now();
+    if (now - lastCall >= delay) {
+      lastCall = now;
+      fn(...args);
+    }
+  };
+}
+
+// 사용 예시
+const handleScroll = throttle(() => {
+  console.log("스크롤 위치:", window.scrollY);
+}, 100);
+```
+
+### 2. 배치 DOM 업데이트
+
+여러 DOM 요소를 추가할 때는 개별적으로 추가하지 말고, DocumentFragment를 사용하여 한 번에 추가합니다.
+
+```javascript
+// 나쁜 예: 100번의 Reflow 발생
+for (let i = 0; i < 100; i++) {
+  const div = document.createElement("div");
+  document.body.appendChild(div); // 100번 Reflow!
+}
+
+// 좋은 예: 1번의 Reflow만 발생
+const fragment = document.createDocumentFragment();
+for (let i = 0; i < 100; i++) {
+  const div = document.createElement("div");
+  fragment.appendChild(div);
+}
+document.body.appendChild(fragment); // 1번만 Reflow
+```
+
+### 3. 이벤트 위임 (Event Delegation)
+
+많은 요소에 이벤트 리스너를 등록하는 대신, 부모 요소에 하나만 등록하고 이벤트 버블링을 활용합니다.
+
+```javascript
+// 나쁜 예: 각 버튼마다 리스너 등록
+document.querySelectorAll("button").forEach((btn) => {
+  btn.addEventListener("click", handleClick);
+});
+
+// 좋은 예: 부모 요소에 하나만 등록
+document.body.addEventListener("click", (e) => {
+  if (e.target.tagName === "BUTTON") {
+    handleClick(e);
+  }
+});
+```
+
+## 참고 자료
+
+- [Event Loop Spec](https://html.spec.whatwg.org/multipage/webappapis.html#event-loops)
+- [Tasks, microtasks, queues and schedules](https://jakearchibald.com/2015/tasks-microtasks-queues-and-schedules/)
+- [MDN - Event Loop](https://developer.mozilla.org/ko/docs/Web/JavaScript/EventLoop)

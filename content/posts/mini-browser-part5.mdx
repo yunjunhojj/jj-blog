@@ -1,0 +1,773 @@
+---
+title: "나만의 웹 브라우저 만들기 (5부) - Electron 데스크톱 앱"
+date: 2025-11-15
+description: "미니 브라우저를 Electron으로 데스크톱 앱화하고, Canvas 렌더링과 Real DOM 방식을 비교합니다. 시리즈 완결편!"
+tags: ["Browser", "Electron", "Desktop", "DOM"]
+category: "개발"
+---
+
+# 나만의 웹 브라우저 만들기 (5부) - Electron 데스크톱 앱
+
+> "미니 브라우저를 브라우저 안에서만 쓰기엔 아깝다. 진짜 **데스크톱 앱**으로 만들자!"
+
+## 이전 내용
+
+- [Part 1](/posts/mini-browser-part1): HTML/CSS 파서
+- [Part 2](/posts/mini-browser-part2): 레이아웃 & 페인팅
+- [Part 3](/posts/mini-browser-part3): 통합 렌더 파이프라인
+- [Part 4](/posts/mini-browser-part4): JavaScript 실행 환경
+
+## Electron으로 데스크톱 앱 만들기
+
+### Electron이란?
+
+Electron은 웹 기술(HTML, CSS, JavaScript)로 **네이티브 데스크톱 앱**을 만들 수 있게 해주는 프레임워크입니다.
+
+**Electron 구조**:
+
+```
+Main Process (Node.js)
+  ├─ BrowserWindow 생성
+  ├─ 파일 시스템 접근
+  ├─ 네이티브 메뉴
+  └─ IPC (Inter-Process Communication)
+
+Renderer Process (Chromium)
+  └─ 우리의 Mini Browser 코드 실행
+```
+
+**사용 사례**:
+
+- VS Code
+- Slack
+- Discord
+- Figma Desktop
+
+### 설치 및 설정
+
+**package.json 수정**:
+
+```json
+{
+  "name": "mini-browser",
+  "version": "1.0.0",
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "dev:web": "vite --config packages/apps/gui/vite.config.ts",
+    "dev:electron": "concurrently \"yarn dev:electron:watch\" \"yarn dev:electron:run\"",
+    "dev:electron:watch": "tsc -p tsconfig.electron.json --watch",
+    "dev:electron:run": "wait-on -f dist/electron/main.js && cross-env NODE_ENV=development electron dist/electron/main.js",
+    "dev": "concurrently \"yarn dev:web\" \"yarn dev:electron\"",
+    "build": "yarn build:web && yarn build:electron",
+    "build:web": "vite build --config packages/apps/gui/vite.config.ts",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.5",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^39.2.3",
+    "electron-builder": "^26.0.12",
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.6.3",
+    "vite": "^7.2.4",
+    "wait-on": "^9.0.3"
+  }
+}
+```
+
+```json
+// tsconfig.electron.json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "rootDir": "electron",
+    "outDir": "dist/electron",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node", "electron"]
+  },
+  "include": ["electron/**/*.ts"]
+}
+```
+
+```bash
+yarn install
+```
+
+### Main Process 구현
+
+```typescript
+// electron/main.ts
+import { app, BrowserWindow } from "electron";
+import path from "path";
+import http from "http";
+
+let mainWindow: BrowserWindow | null = null;
+
+async function createWindow() {
+  // 개발/프로덕션 모두 컴파일된 파일 사용
+  const preloadPath = path.join(__dirname, "preload.js");
+
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: preloadPath,
+    },
+    title: "Mini Browser",
+  });
+
+  // 개발 모드: Vite 서버 로드
+  if (!app.isPackaged) {
+    // Vite 서버가 준비될 때까지 대기
+    const viteUrl = "http://localhost:5173";
+    let retries = 30;
+    let serverReady = false;
+
+    console.log("Vite 서버 연결 대기 중...");
+    while (retries > 0 && !serverReady) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const req = http.get(viteUrl, (res) => {
+            if (res.statusCode === 200 || res.statusCode === 304) {
+              serverReady = true;
+              console.log("Vite 서버 연결 성공!");
+              resolve();
+            } else {
+              reject(new Error(`Status: ${res.statusCode}`));
+            }
+          });
+          req.on("error", (err) => {
+            reject(new Error(`Connection failed: ${err.message}`));
+          });
+          req.setTimeout(1000, () => {
+            req.destroy();
+            reject(new Error("Timeout"));
+          });
+        });
+        break;
+      } catch (error) {
+        // 서버가 아직 준비되지 않음
+        if (retries % 5 === 0) {
+          console.log(`Vite 서버 대기 중... (${retries}회 남음)`);
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      retries--;
+    }
+
+    if (!serverReady) {
+      const errorHtml = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="UTF-8">
+            <title>Vite 서버 연결 실패</title>
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                background: #f5f5f5;
+              }
+              .error-box {
+                background: white;
+                padding: 40px;
+                border-radius: 8px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                max-width: 500px;
+              }
+              h1 { color: #d32f2f; margin-top: 0; }
+              code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; }
+            </style>
+          </head>
+          <body>
+            <div class="error-box">
+              <h1>⚠️ Vite 서버를 찾을 수 없습니다</h1>
+              <p>다음 명령어를 실행하여 Vite 개발 서버를 시작하세요:</p>
+              <p><code>yarn dev:web</code></p>
+              <p>또는</p>
+              <p><code>yarn dev</code> (Vite와 Electron을 동시에 실행)</p>
+            </div>
+          </body>
+        </html>
+      `;
+      await mainWindow.loadURL(
+        `data:text/html;charset=utf-8,${encodeURIComponent(errorHtml)}`
+      );
+      mainWindow.webContents.openDevTools();
+      return;
+    }
+
+    try {
+      await mainWindow.loadURL(viteUrl);
+      mainWindow.webContents.openDevTools();
+
+      // 로드 실패 감지
+      mainWindow.webContents.on(
+        "did-fail-load",
+        (event, errorCode, errorDescription) => {
+          console.error("페이지 로드 실패:", errorCode, errorDescription);
+        }
+      );
+    } catch (error) {
+      console.error("URL 로드 중 오류:", error);
+    }
+  }
+  // 프로덕션: 빌드된 HTML 로드
+  else {
+    const projectRoot = path.resolve(
+      __dirname,
+      app.isPackaged ? ".." : "",
+      ".."
+    );
+    await mainWindow.loadFile(
+      path.join(projectRoot, "packages/apps/gui/dist/index.html")
+    );
+  }
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+}
+
+app.whenReady().then(createWindow);
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
+});
+```
+
+### Preload Script (선택사항)
+
+```typescript
+// electron/preload.ts
+
+import { contextBridge, ipcRenderer } from "electron";
+
+contextBridge.exposeInMainWorld("electronAPI", {
+  openFile: () => ipcRenderer.invoke("dialog:openFile"),
+  saveFile: (data: string) => ipcRenderer.invoke("dialog:saveFile", data),
+});
+```
+
+### 실행
+
+```bash
+# 빌드
+yarn build
+
+# 실행
+yarn dev
+```
+
+## Real DOM 렌더링 모드 구현
+
+Canvas에 그리는 대신, 실제 HTML 요소를 생성하는 방식으로 전환해봅시다!
+
+### createRealDOM 함수
+
+```typescript
+// packages/core/renderDOM.ts
+import { ComputedStyle } from "./layout/types";
+import { DOMNode, parseHTML } from "./html/parser";
+import { applyStyles } from "./style/resolver";
+import { parseCSS } from "./css/parser";
+import { loadCSS, loadHTML } from "./utils/loadResources";
+import { JSInterpreter } from "./js/interpreter";
+import { EventLoop } from "./runtime/loop/eventLoop";
+
+export function createRealDOM(node: DOMNode): HTMLElement | Text | null {
+  // 텍스트 노드
+  if (node.type === "text") {
+    return document.createTextNode(node.text || "");
+  }
+
+  // 요소 노드
+  if (node.type === "element") {
+    // script 태그는 DOM에 추가하지 않음 (JSInterpreter로 별도 실행)
+    if (node.name === "script") {
+      return null;
+    }
+
+    const element = document.createElement(node.name || "div");
+
+    // 1. 속성 적용
+    for (const attr in node.attrs) {
+      element.setAttribute(attr, node.attrs[attr]);
+    }
+
+    // 2. 스타일 적용
+    if (node.computedStyle) {
+      applyStylesToElement(element, node.computedStyle);
+    }
+
+    // 3. 자식 재귀 생성
+    if (node.children) {
+      for (const child of node.children) {
+        const childElement = createRealDOM(child);
+        if (childElement) {
+          element.appendChild(childElement);
+        }
+      }
+    }
+
+    return element;
+  }
+
+  return null;
+}
+
+function applyStylesToElement(
+  element: HTMLElement,
+  style: ComputedStyle
+): void {
+  for (const key in style) {
+    // kebab-case → camelCase 변환
+    const camelKey = key.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
+    element.style[camelKey as any] = style[key];
+  }
+}
+
+export async function renderPageToDOM({
+  htmlUrl,
+  cssUrl,
+  container,
+}: {
+  htmlUrl: string;
+  cssUrl: string;
+  container: HTMLElement;
+}): Promise<void> {
+  // 1. HTML/CSS 로드 & 파싱
+  const [htmlText, cssText] = await Promise.all([
+    loadHTML(htmlUrl),
+    loadCSS(cssUrl),
+  ]);
+
+  const dom = parseHTML(htmlText);
+  const cssRules = parseCSS(cssText);
+
+  // 2. 스타일 적용
+  applyStyles(dom, cssRules);
+
+  // 3. 실제 DOM 생성
+  const realDOM = createRealDOM(dom);
+
+  // 4. 컨테이너에 추가
+  container.innerHTML = "";
+  if (realDOM) {
+    container.appendChild(realDOM);
+  }
+  // 5. JavaScript 실행
+  const scripts = extractScripts(dom);
+  if (scripts.length > 0) {
+    const bindings = createSimpleDOMBindings(container);
+    const eventLoop = new EventLoop();
+    const interpreter = new JSInterpreter(bindings, eventLoop);
+
+    interpreter.updateGlobals({
+      setTimeout: (fn: Function, ms = 0) => interpreter.setTimeout(fn, ms),
+      clearTimeout: (id: number) => interpreter.clearTimeout(id),
+      setInterval: (fn: Function, ms = 0) => interpreter.setInterval(fn, ms),
+      clearInterval: (id: number) => interpreter.clearInterval(id),
+      queueMicrotask: (fn: Function) => interpreter.queueMicrotask(fn),
+      requestAnimationFrame: (fn: Function) =>
+        interpreter.requestAnimationFrame(fn),
+    });
+
+    for (const code of scripts) {
+      try {
+        interpreter.run(code);
+      } catch (error) {
+        console.error("Script execution error:", error);
+      }
+    }
+  }
+}
+
+function extractScripts(node: DOMNode): string[] {
+  const scripts: string[] = [];
+
+  if (node.type === "element" && node.name === "script") {
+    if (node.children && node.children[0]?.type === "text") {
+      scripts.push(node.children[0].text || "");
+    }
+  }
+
+  if (node.children) {
+    for (const child of node.children) {
+      scripts.push(...extractScripts(child));
+    }
+  }
+
+  return scripts;
+}
+
+function createSimpleDOMBindings(root: HTMLElement): Record<string, any> {
+  return {
+    document: {
+      createElement: (tag: string) => document.createElement(tag),
+      createTextNode: (text: string) => document.createTextNode(text),
+      appendChild: (node: any) => {
+        root.appendChild(node);
+      },
+      querySelector: (selector: string) => root.querySelector(selector),
+      querySelectorAll: (selector: string) => root.querySelectorAll(selector),
+      getElementById: (id: string) => document.getElementById(id),
+      addEventListener: (event: string, handler: Function) => {
+        root.addEventListener(event, handler as EventListener);
+      },
+      removeEventListener: (event: string, handler: Function) => {
+        root.removeEventListener(event, handler as EventListener);
+      },
+    },
+    console: console,
+    alert: (msg: any) => {
+      const alertDiv = document.createElement("div");
+      alertDiv.textContent = `Alert: ${String(msg)}`;
+      alertDiv.style.cssText = `
+          background: #ffeeba;
+          border: 1px solid #ffc107;
+          padding: 10px;
+          color: #856404;
+          margin: 10px 0;
+        `;
+      root.appendChild(alertDiv);
+    },
+    setTimeout: (fn: Function, ms: number) => setTimeout(fn, ms),
+    setInterval: (fn: Function, ms: number) => setInterval(fn, ms),
+    clearTimeout: (id: number) => clearTimeout(id),
+    clearInterval: (id: number) => clearInterval(id),
+  };
+}
+
+function convertToDOMNode(node: DOMNode): DOMNode {
+  const computedStyle = node.computedStyle
+    ? (node.computedStyle as ComputedStyle)
+    : undefined;
+
+  const result: DOMNode = {
+    type: node.type,
+    ...(node.name && { name: node.name }),
+    ...(node.attrs && { attrs: node.attrs }),
+    ...(node.children && {
+      children: node.children.map((c) => convertToDOMNode(c as any)),
+    }),
+    ...(node.text && { text: node.text }),
+    ...(computedStyle && { computedStyle }),
+    parent: node.parent,
+    id: node.id,
+  };
+
+  return result;
+}
+```
+
+### main.ts 변경
+
+```typescript
+// packages/apps/gui/main.ts
+
+import { renderPage } from "../../core/render";
+import { renderPageToDOM } from "../../core/renderDOM";
+
+const MODE: "canvas" | "dom" = "dom"; // "canvas" 또는 "dom"
+
+async function main() {
+  const htmlUrl = "/part5.html";
+  const cssUrl = "/part3.css";
+
+  if (MODE === "canvas") {
+    // Canvas 모드
+    const canvas = document.getElementById("screen") as HTMLCanvasElement;
+    const ctx = setupCanvas(canvas);
+
+    await renderPage({
+      htmlUrl,
+      cssUrl,
+      ctx,
+      viewport: { width: 900, height: 600 },
+    });
+  } else {
+    // Real DOM 모드
+    const container = document.getElementById("screen") as HTMLDivElement;
+
+    await renderPageToDOM({
+      htmlUrl,
+      cssUrl,
+      container,
+    });
+  }
+}
+
+function setupCanvas(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  const ctx = canvas.getContext("2d")!;
+  const pixelRatio = window.devicePixelRatio || 1;
+
+  // CSS 크기
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+
+  // 실제 픽셀 크기
+  canvas.width = width * pixelRatio;
+  canvas.height = height * pixelRatio;
+
+  // CSS 크기 유지
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+
+  return ctx;
+}
+
+main().catch(console.error);
+```
+
+### interpreter.ts 변경
+
+```typescript
+// packages/core/js/interpreter.ts
+import { EventLoop } from "../runtime/loop/eventLoop";
+
+export class JSInterpreter {
+  globalEnv: Record<string, any> = {};
+  eventLoop: EventLoop;
+
+  constructor(globalScope: Record<string, any> = {}, eventLoop?: EventLoop) {
+    this.globalEnv = { ...globalScope };
+    this.eventLoop = eventLoop ?? new EventLoop();
+  }
+
+  updateGlobals(scope: Record<string, any>) {
+    this.globalEnv = { ...this.globalEnv, ...scope };
+  }
+
+  run(code: string): any {
+    // 매우 단순한 eval 래퍼 (실제 구현 시 AST 파싱 필요)
+    try {
+      const fn = new Function(...Object.keys(this.globalEnv), code);
+      return fn(...Object.values(this.globalEnv));
+    } catch (error) {
+      console.error("JS execution error:", error);
+      throw error;
+    }
+  }
+
+  setTimeout(fn: Function, ms = 0) {
+    const id = setTimeout(() => {
+      this.eventLoop.setTimeout(() => fn(), ms);
+    }, ms);
+    return id;
+  }
+
+  clearTimeout(id: number) {
+    clearTimeout(id);
+  }
+
+  setInterval(fn: Function, ms = 0) {
+    const id = setInterval(() => {
+      this.eventLoop.setInterval(() => fn(), ms);
+    }, ms);
+    return id;
+  }
+
+  clearInterval(id: number) {
+    clearInterval(id);
+  }
+
+  queueMicrotask(fn: Function) {
+    this.eventLoop.queueMicrotask(() => fn());
+  }
+
+  requestAnimationFrame(fn: Function) {
+    this.eventLoop.requestAnimationFrame(() => fn());
+  }
+}
+```
+
+## Canvas vs Real DOM 비교
+
+### 실전 데모
+
+```html
+<!-- packages/apps/gui/part5.html -->
+<!DOCTYPE html>
+<html>
+  <body>
+    <div id="main">
+      <h1>Real DOM Demo</h1>
+      <p>이 텍스트는 드래그로 선택할 수 있습니다!</p>
+      <button id="btn">Click Me</button>
+      <div id="output"></div>
+
+      <script>
+        console.log("Script loaded!");
+        const btn = document.querySelector("#btn");
+        btn.addEventListener("click", () => {
+          alert("Real DOM 모드에서 작동합니다!");
+
+          console.log("Button clicked!");
+
+          const output = document.querySelector("#output");
+          const p = document.createElement("p");
+          p.textContent = "버튼이 클릭되었습니다!";
+          output.appendChild(p);
+        });
+      </script>
+    </div>
+  </body>
+</html>
+```
+
+```html
+<!-- packages/apps/gui/index.html -->
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Mini Browser</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      #screen {
+        width: 100%;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Canvas 모드일 때 -->
+    <!-- <canvas id="screen"></canvas> -->
+
+    <!-- Real DOM 모드일 때 -->
+    <div id="screen"></div>
+
+    <script type="module" src="/main.ts"></script>
+  </body>
+</html>
+```
+
+### 결과 비교
+
+**Canvas 모드**:
+
+- ❌ 텍스트 드래그 불가
+- ❌ 버튼은 Canvas 좌표 계산으로 클릭 감지
+- ⚠️ 개발자 도구로 요소 검사 불가
+
+**Real DOM 모드**:
+
+- ✅ 텍스트 드래그로 선택 가능
+- ✅ 버튼 클릭이 네이티브로 동작
+- ✅ 개발자 도구로 요소 검사 가능
+
+## 배운 것들
+
+### 1. Electron 기본 구조
+
+- Main Process와 Renderer Process의 역할
+- IPC (Inter-Process Communication) 방식
+
+| 기능               | Canvas 모드         | 실제 브라우저      |
+| ------------------ | ------------------- | ------------------ |
+| **텍스트 선택**    | ❌ 불가능           | ✅ 가능            |
+| **링크 클릭**      | ❌ 불가능           | ✅ 가능            |
+| **개발자 도구**    | ❌ Canvas만 보임    | ✅ 요소 검사 가능  |
+| **CSS 애니메이션** | ❌ 동작 안 함       | ✅ 자동 동작       |
+| **접근성(a11y)**   | ❌ 스크린 리더 불가 | ✅ 지원            |
+| **성능**           | ⚠️ 수동 최적화 필요 | ✅ 브라우저 최적화 |
+
+**Canvas의 장점**:
+
+- 브라우저 렌더링 엔진의 동작 원리를 깊게 이해
+- Reflow/Repaint 최적화의 진짜 의미 체감
+- 완전한 제어 가능
+
+전체 브라우저 렌더링 파이프라인을 구현했습니다. 시리즈 5개로 완결되었습니다.
+
+### 배운 것들
+
+1. **HTML/CSS 파서**
+
+   - 토크나이저와 파서의 동작 원리
+   - DOM 트리 구조
+   - CSS 선택자와 룰셋
+
+2. **레이아웃 엔진**
+
+   - CSS 박스 모델 계산
+   - 블록 레이아웃 알고리즘
+   - Reflow가 비싼 이유
+
+3. **페인팅**
+
+   - Canvas API 활용
+   - HiDPI 지원
+   - 텍스트 측정과 렌더링
+
+4. **스타일 리졸버**
+
+   - Cascade 알고리즘
+   - 특이성 계산
+   - 상속 처리
+
+5. **JavaScript 실행 환경**
+
+   - 인터프리터 구현
+   - DOM API 바인딩
+   - 이벤트 루프 (Macro/Micro Task)
+
+6. **Electron**
+   - 데스크톱 앱 패키징
+   - Main/Renderer Process
+   - IPC 통신
+
+### 실무에 적용하기
+
+## 마무리
+
+이 시리즈를 통해 브라우저의 내부 동작 원리를 깊이 이해했기를 바랍니다.
+
+**핵심 메시지**:
+
+> "복잡해 보이는 브라우저도, 결국 작은 모듈들의 조합이다"
+
+## 전체 시리즈 링크
+
+- [Part 1: HTML/CSS 파서 구현](/posts/mini-browser-part1)
+- [Part 2: 레이아웃 & 페인팅 엔진](/posts/mini-browser-part2)
+- [Part 3: 통합 렌더 파이프라인](/posts/mini-browser-part3)
+- [Part 4: JavaScript 실행 환경](/posts/mini-browser-part4)
+- [Part 5: Electron 데스크톱 앱](/posts/mini-browser-part5) (현재)
+
+## 참고 자료
+
+- [Electron Documentation](https://www.electronjs.org/docs/latest/)
+- [How Browsers Work](https://web.dev/howbrowserswork/)
+- [Inside look at modern web browser](https://developer.chrome.com/blog/inside-browser-part1/)
+- [Life of a Pixel](https://www.youtube.com/watch?v=PwYxv-43iM4)
+
+감사합니다!
