@@ -12,10 +12,12 @@ category: "개발"
 
 ## 이전 내용 복습
 
-- [Part 1](/posts/mini-browser-part1): HTML/CSS 파서 구현
-- [Part 2](/posts/mini-browser-part2): 레이아웃 & 페인팅 엔진
+지금까지 만든 것들:
 
-이제 이 모든 조각을 하나로 합쳐 **렌더링 파이프라인**을 만들어야 합니다.
+- [Part 1](/posts/mini-browser-part1): HTML/CSS 파서 - 텍스트를 구조화된 데이터로
+- [Part 2](/posts/mini-browser-part2): 스타일 적용, 레이아웃, 페인팅 - 데이터를 화면으로
+
+이제 이 모든 조각을 **하나의 렌더링 파이프라인**으로 통합하고, 실제 HTML/CSS 파일을 로드하여 렌더링해보겠습니다.
 
 ## 전체 파이프라인 시각화
 
@@ -31,382 +33,31 @@ CSS 문자열 ──→ [parseCSS] ──→ CSS 룰셋
                           [paint] ──→ Canvas 출력
 ```
 
-## 스타일 리졸버 구현
+## 리소스 로더 구현
 
-### CSS Cascade 알고리즘
+실제 브라우저처럼 외부 HTML/CSS 파일을 불러오는 기능이 필요합니다.
 
-브라우저는 여러 CSS 룰이 하나의 요소에 적용될 때, 다음 순서로 우선순위를 결정합니다:
-
-1. **특이성(Specificity)** 계산
-2. **선언 순서** (나중에 선언된 것이 우선)
-3. **상속**(Inheritance)
-
-### 특이성 계산
+### 파일 로딩 유틸리티
 
 ```typescript
-// packages/core/style/specificity.ts
-export interface Specificity {
-  inline: number; // style="..." (1000점)
-  id: number; // #id (100점)
-  class: number; // .class (10점)
-  tag: number; // tag (1점)
-}
+//  packages/core/utils/loadResources.ts
 
-export function calculateSpecificity(selector: string): Specificity {
-  const spec: Specificity = { inline: 0, id: 0, class: 0, tag: 0 };
-
-  // ID 선택자
-  const ids = selector.match(/#[\w-]+/g);
-  spec.id = ids ? ids.length : 0;
-
-  // 클래스 선택자
-  const classes = selector.match(/\.[\w-]+/g);
-  spec.class = classes ? classes.length : 0;
-
-  // 태그 선택자 (단순화)
-  const tags = selector.match(/^[\w-]+|[\s>+~][\w-]+/g);
-  spec.tag = tags ? tags.length : 0;
-
-  return spec;
-}
-
-export function compareSpecificity(a: Specificity, b: Specificity): number {
-  if (a.inline !== b.inline) return a.inline - b.inline;
-  if (a.id !== b.id) return a.id - b.id;
-  if (a.class !== b.class) return a.class - b.class;
-  return a.tag - b.tag;
-}
-```
-
-### 선택자 매칭
-
-```typescript
-// packages/core/style/matcher.ts
-import { DOMNode } from "../html/parser";
-
-export function matchesSelector(node: DOMNode, selector: string): boolean {
-  selector = selector.trim();
-
-  // 후손 선택자 (공백 포함): .card h2, #main .title
-  if (selector.includes(" ")) {
-    const parts = selector.split(/\s+/).filter((s) => s);
-    return matchesDescendantSelector(node, parts);
-  }
-
-  // 단일 선택자 매칭
-  return matchesSingleSelector(node, selector);
-}
-
-/**
- * 단일 선택자 매칭 (ID, 클래스, 태그)
- */
-function matchesSingleSelector(node: DOMNode, selector: string): boolean {
-  if (!node || node.type !== "element") return false;
-
-  // ID 선택자: #main
-  if (selector.startsWith("#")) {
-    const id = selector.slice(1);
-    return node.attrs?.id === id;
-  }
-
-  // 클래스 선택자: .title
-  if (selector.startsWith(".")) {
-    const className = selector.slice(1);
-    const classes = node.attrs?.class?.split(" ") || [];
-    return classes.includes(className);
-  }
-
-  // 태그 선택자: div, h1, p
-  return node.name === selector;
-}
-
-/**
- * 후손 선택자 매칭: .card h2, #main .title
- * parts = [".card", "h2"]인 경우:
- * 1. 현재 노드가 h2와 매칭되는지 확인
- * 2. 부모 체인에서 .card를 찾기
- */
-function matchesDescendantSelector(node: DOMNode, parts: string[]): boolean {
-  if (parts.length === 0) return true;
-  if (parts.length === 1) return matchesSingleSelector(node, parts[0]);
-
-  // 마지막 선택자가 현재 노드와 매칭되는지 확인
-  const lastSelector = parts[parts.length - 1];
-  if (!matchesSingleSelector(node, lastSelector)) {
-    return false;
-  }
-
-  // 나머지 선택자들을 부모 체인에서 역순으로 찾기
-  // 예: [".card", "h2"]에서 h2가 매칭되면, 부모 체인에서 .card를 찾음
-  let currentParent = node.parent;
-  let selectorIndex = parts.length - 2; // 뒤에서 두 번째부터 시작
-
-  while (currentParent && selectorIndex >= 0) {
-    if (matchesSingleSelector(currentParent, parts[selectorIndex])) {
-      selectorIndex--;
-      if (selectorIndex < 0) {
-        // 모든 선택자가 매칭됨
-        return true;
-      }
-    }
-    currentParent = currentParent.parent;
-  }
-
-  return selectorIndex < 0;
-}
-```
-
-### 스타일 적용
-
-```typescript
-// packages/core/style/resolver.ts
-import { DOMNode } from "../html/parser";
-import { CSSRule } from "../css/parser";
-import { matchesSelector } from "./matcher";
-import {
-  calculateSpecificity,
-  compareSpecificity,
-  Specificity,
-} from "./specificity";
-import { expandShorthands } from "./shorthand";
-
-export function applyStyles(dom: DOMNode, cssRules: CSSRule[]): void {
-  // 모든 노드 순회
-  traverseDOM(dom, (node) => {
-    if (node.type !== "element") return;
-
-    // 노드에 적용될 스타일을 우선순위별로 수집
-    const applicableRules: Array<{
-      rule: CSSRule;
-      selector: string;
-      specificity: Specificity;
-    }> = [];
-
-    for (const rule of cssRules) {
-      for (const selector of rule.selectors) {
-        if (matchesSelector(node, selector)) {
-          applicableRules.push({
-            rule,
-            selector,
-            specificity: calculateSpecificity(selector),
-          });
-        }
-      }
-    }
-
-    // 특이성 순으로 정렬
-    applicableRules.sort((a, b) =>
-      compareSpecificity(a.specificity, b.specificity)
-    );
-
-    // 스타일 병합 (낮은 특이성 → 높은 특이성 순)
-    node.computedStyle = {};
-    for (const { rule } of applicableRules) {
-      Object.assign(node.computedStyle, rule.declarations);
-    }
-
-    // Shorthand 속성 확장
-    expandShorthands(node.computedStyle);
-
-    // 상속 처리
-    inheritStyles(node);
-  });
-}
-
-function traverseDOM(node: DOMNode, callback: (node: DOMNode) => void): void {
-  callback(node);
-  if (node.children) {
-    for (const child of node.children) {
-      traverseDOM(child, callback);
-    }
-  }
-}
-
-// 상속 처리
-const INHERITED_PROPERTIES = [
-  "color",
-  "fontSize",
-  "fontWeight",
-  "fontFamily",
-  "lineHeight",
-  "textAlign",
-  "letterSpacing",
-];
-
-function inheritStyles(node: DOMNode): void {
-  if (!node.parent || !node.parent.computedStyle) return;
-
-  const parentStyle = node.parent.computedStyle;
-  const nodeStyle = node.computedStyle || {};
-
-  for (const prop of INHERITED_PROPERTIES) {
-    // 명시적으로 지정되지 않았으면 부모에서 상속
-    if (!nodeStyle[prop] && parentStyle[prop]) {
-      nodeStyle[prop] = parentStyle[prop];
-    }
-  }
-
-  node.computedStyle = nodeStyle;
-}
-```
-
-## Shorthand 속성 처리
-
-### Margin/Padding 확장
-
-```typescript
-// packages/core/style/shorthand.ts
-import { ComputedStyle } from "../layout/types";
-
-export function expandShorthands(style: ComputedStyle): void {
-  // margin shorthand 확장
-  if (style.margin) {
-    const values = parseBoxShorthand(style.margin);
-    style.marginTop = values.top;
-    style.marginRight = values.right;
-    style.marginBottom = values.bottom;
-    style.marginLeft = values.left;
-    delete style.margin;
-  }
-
-  // padding shorthand 확장
-  if (style.padding) {
-    const values = parseBoxShorthand(style.padding);
-    style.paddingTop = values.top;
-    style.paddingRight = values.right;
-    style.paddingBottom = values.bottom;
-    style.paddingLeft = values.left;
-    delete style.padding;
-  }
-
-  // border shorthand 확장: "2px solid #e1e4e8"
-  if (style.border) {
-    const borderParts = style.border.split(/\s+/);
-    for (const part of borderParts) {
-      if (part.match(/^\d+px$/)) {
-        style.borderWidth = part;
-      } else if (part.match(/^(solid|dashed|dotted)$/)) {
-        style.borderStyle = part;
-      } else if (part.match(/^#|^rgb|^rgba/)) {
-        style.borderColor = part;
-      }
-    }
-    delete style.border;
-  }
-
-  // 기본값 설정
-  const hasMargin =
-    style.marginTop !== undefined ||
-    style.marginRight !== undefined ||
-    style.marginBottom !== undefined ||
-    style.marginLeft !== undefined;
-  if (hasMargin) {
-    style.marginTop = style.marginTop || "0";
-    style.marginRight = style.marginRight || "0";
-    style.marginBottom = style.marginBottom || "0";
-    style.marginLeft = style.marginLeft || "0";
-  }
-
-  const hasPadding =
-    style.paddingTop !== undefined ||
-    style.paddingRight !== undefined ||
-    style.paddingBottom !== undefined ||
-    style.paddingLeft !== undefined;
-  if (hasPadding) {
-    style.paddingTop = style.paddingTop || "0";
-    style.paddingRight = style.paddingRight || "0";
-    style.paddingBottom = style.paddingBottom || "0";
-    style.paddingLeft = style.paddingLeft || "0";
-  }
-
-  const hasBorder =
-    style.borderWidth !== undefined ||
-    style.borderStyle !== undefined ||
-    style.borderColor !== undefined;
-  if (hasBorder) {
-    style.borderWidth = style.borderWidth || "0";
-    style.borderStyle = style.borderStyle || "solid";
-    style.borderColor = style.borderColor || "#000";
-  }
-
-  const hasFont =
-    style.fontSize !== undefined || style.fontWeight !== undefined;
-  if (hasFont) {
-    style.fontSize = style.fontSize || "16px";
-    style.fontWeight = style.fontWeight || "normal";
-  }
-}
-
-/**
- * Box shorthand를 4방향 값으로 파싱
- * - 1개 값: 모두 동일
- * - 2개 값: top/bottom, left/right
- * - 3개 값: top, left/right, bottom
- * - 4개 값: top, right, bottom, left
- */
-function parseBoxShorthand(value: string): {
-  top: string;
-  right: string;
-  bottom: string;
-  left: string;
-} {
-  const parts = value.trim().split(/\s+/);
-
-  switch (parts.length) {
-    case 1:
-      return {
-        top: parts[0],
-        right: parts[0],
-        bottom: parts[0],
-        left: parts[0],
-      };
-    case 2:
-      return {
-        top: parts[0],
-        right: parts[1],
-        bottom: parts[0],
-        left: parts[1],
-      };
-    case 3:
-      return {
-        top: parts[0],
-        right: parts[1],
-        bottom: parts[2],
-        left: parts[1],
-      };
-    case 4:
-      return {
-        top: parts[0],
-        right: parts[1],
-        bottom: parts[2],
-        left: parts[3],
-      };
-    default:
-      return { top: "0", right: "0", bottom: "0", left: "0" };
-  }
-}
-```
-
-## 리소스 로더
-
-### HTML/CSS 파일 로드
-
-```typescript
-// packages/core/utils/loadResources.ts
-export async function loadHTML(url: string): Promise<string> {
+async function fetchTextResource(url: string, label: string): Promise<string> {
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Failed to load HTML: ${response.statusText}`);
+    throw new Error(
+      `Failed to load ${label}: ${response.status} ${response.statusText}`
+    );
   }
   return await response.text();
+}
+
+export async function loadHTML(url: string): Promise<string> {
+  return fetchTextResource(url, "HTML");
 }
 
 export async function loadCSS(url: string): Promise<string> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to load CSS: ${response.statusText}`);
-  }
-  return await response.text();
+  return fetchTextResource(url, "CSS");
 }
 
 export async function loadResources(htmlUrl: string, cssUrl: string) {
@@ -418,18 +69,28 @@ export async function loadResources(htmlUrl: string, cssUrl: string) {
 }
 ```
 
-## 통합 렌더 함수
+## 통합 렌더링 함수
+
+모든 단계를 하나로 묶는 `renderPage` 함수를 만들어봅시다. 이 함수는:
+
+1. HTML/CSS 파일을 로드
+2. 파싱
+3. 스타일 적용
+4. 레이아웃 계산
+5. 페인팅
+
+을 순차적으로 실행합니다.
 
 ```typescript
-// packages/core/render.ts
-import { parseHTML } from "./html/parser";
-import { parseCSS } from "./css/parser";
-import { applyStyles } from "./style/resolver";
-import { layout } from "./layout/engine";
-import { paint } from "./paint/painter";
-import { loadResources } from "./utils/loadResources";
-import { LayoutBox } from "./layout/types";
-import { DOMNode } from "./html/parser";
+//  packages/core/utils/render.ts
+
+import { layout } from "../layout/engine";
+import { paint } from "../paint/painter";
+import { LayoutBox } from "../layout/types";
+import { DOMNode, parseHTML } from "../html/parser";
+import { loadResources } from "../utils/loadResources";
+import { applyStyles } from "../style/resolver";
+import { parseCSS } from "../css/parser";
 
 export interface RenderOptions {
   htmlUrl: string;
@@ -450,6 +111,7 @@ export async function renderPage(
   options: RenderOptions
 ): Promise<RenderResult> {
   const { htmlUrl, cssUrl, ctx, viewport } = options;
+  console.time("Prepare DOM");
   // 1. 리소스 로드
   console.time("Load Resources");
   const { htmlText, cssText } = await loadResources(htmlUrl, cssUrl);
@@ -469,12 +131,12 @@ export async function renderPage(
   applyStyles(dom, cssRules);
   console.timeEnd("Apply Styles");
 
-  // 4. 레이아웃 계산
+  // 레이아웃 계산
   console.time("Layout");
   const layoutTree = layout(dom, viewport, ctx);
   console.timeEnd("Layout");
 
-  // 5. 페인팅
+  // 페인팅
   console.time("Paint");
   const pixelRatio = window.devicePixelRatio || 1;
   paint(layoutTree, { ctx, pixelRatio });
@@ -515,6 +177,7 @@ export async function renderPage(
 
 ```css
 /* packages/apps/gui/part3.css */
+
 body {
   background: #fff;
   font-size: 16px;
@@ -572,26 +235,19 @@ body {
 
 ```typescript
 // packages/apps/gui/part3.ts
+
 import { renderPage } from "../../core/render";
+import { setupCanvas } from "../../core/utils/canvas";
 
 async function main() {
   const canvas = document.getElementById("screen") as HTMLCanvasElement;
-  const ctx = canvas.getContext("2d")!;
-
-  // Canvas의 CSS 크기
-  const cssWidth = canvas.clientWidth || window.innerWidth;
-  const cssHeight = canvas.clientHeight || window.innerHeight;
-
-  // HiDPI 대응: 실제 해상도 설정
-  const pixelRatio = window.devicePixelRatio || 1;
-  canvas.width = cssWidth * pixelRatio;
-  canvas.height = cssHeight * pixelRatio;
+  const { ctx, viewport } = setupCanvas(canvas);
 
   await renderPage({
     htmlUrl: "/part3.html",
     cssUrl: "/part3.css",
     ctx,
-    viewport: { width: cssWidth, height: cssHeight },
+    viewport,
   });
 }
 
@@ -610,60 +266,39 @@ yarn install
 yarn dev
 ```
 
-**실행 결과**: Canvas에 배경색, 테두리, 여백이 정확히 적용된 HTML이 그려집니다!
+**실행 결과**: Canvas에 배경색, 테두리, 여백이 정확히 적용된 HTML이 렌더링됩니다.
 
-## 성능 측정
+## 성능 분석
 
-개발자 도구 콘솔에서 각 단계의 소요 시간을 확인할 수 있습니다:
+`console.time`으로 각 단계의 소요 시간을 측정했습니다. 개발자 도구 콘솔을 열어 확인 가능합니다.
+
+**분석 결과**:
+
+- **네트워크 로딩** (가장 오래 걸림): HTML/CSS 파일을 가져오는 시간. 실제 브라우저에서는 HTTP 캐시로 최적화합니다.
+- **레이아웃 계산** (두 번째로 느림): 모든 노드를 순회하며 위치/크기를 계산. Reflow가 비싼 이유를 체감할 수 있습니다.
+- **파싱과 페인팅** (상대적으로 빠름): 최적화가 잘 된 영역입니다.
+
+## 핵심 개념 정리
+
+### 1. 렌더링 파이프라인 통합
+
+이제 브라우저의 전체 렌더링 과정을 하나의 함수로 실행할 수 있게 되었습니다.
 
 ```
-Load Resources: 45.2ms
-Parse HTML: 2.1ms
-Parse CSS: 1.3ms
-Apply Styles: 3.7ms
-Layout: 8.9ms
-Paint: 4.2ms
----- Render complete! ----
+URL 입력 → 리소스 로드 → 파싱 → 스타일 적용 → 레이아웃 → 페인팅 → 화면 출력
 ```
 
-**인사이트**:
+### 2. 비동기 처리의 중요성
 
-- 네트워크 로딩이 가장 오래 걸림 (캐싱 필요)
-- 레이아웃 계산이 두 번째로 느림 (Reflow 최적화 필요)
-- 파싱과 페인팅은 상대적으로 빠름
+`Promise.all`로 병렬 로딩하여 성능을 개선했습니다.
 
-## 배운 것들
-
-### 1. CSS Cascade 알고리즘
-
-브라우저가 CSS를 적용하는 방식을 깊이 이해했습니다:
-
-- 특이성 계산 (ID > Class > Tag)
-- 선언 순서의 중요성
-- 상속되는 속성과 안 되는 속성
-
-### 2. Reflow의 비용
-
-레이아웃 재계산이 왜 비싼 연산인지 체감:
-
-- 모든 노드를 재귀적으로 순회
-- 부모-자식 간 의존성
-- 캐싱과 최적화의 필요성
-
-### 3. 파이프라인 설계
-
-각 단계를 모듈화하여 조합:
-
-- 단일 책임 원칙 (SRP)
-- 인터페이스 분리
-- 의존성 주입
-
-### 4. 비동기 리소스 로딩
-
-`Promise.all`로 병렬 로딩:
-
-- HTML과 CSS를 동시에 fetch
-- 네트워크 지연 시간 단축
+```typescript
+// HTML과 CSS를 동시에 fetch (병렬 처리)
+const [htmlText, cssText] = await Promise.all([
+  loadHTML(htmlUrl),
+  loadCSS(cssUrl),
+]);
+```
 
 ## 최적화 아이디어
 
@@ -697,24 +332,6 @@ function getComputedStyle(node: DOMNode): ComputedStyle {
   const style = calculateStyle(node);
   styleCache.set(cacheKey, style);
   return style;
-}
-```
-
-### 3. Dirty Flag 패턴
-
-```typescript
-interface LayoutBox {
-  // ... 기존 필드
-  needsLayout: boolean;
-  needsPaint: boolean;
-}
-
-function markNeedsLayout(box: LayoutBox) {
-  box.needsLayout = true;
-  // 부모도 마킹
-  if (box.parent) {
-    markNeedsLayout(box.parent);
-  }
 }
 ```
 

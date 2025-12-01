@@ -16,193 +16,97 @@ category: "개발"
 - [Part 2](/posts/mini-browser-part2): 레이아웃 & 페인팅
 - [Part 3](/posts/mini-browser-part3): 통합 렌더 파이프라인
 
-이제 마지막 퍼즐 조각, **JavaScript 실행 환경**을 만들 차례입니다!
+이제 **JavaScript 실행 환경**을 만들 차례입니다.
 
 ## JavaScript 인터프리터 구현
 
-### 목표와 제약사항
+### 구현 전략
 
-완전한 JavaScript 파서를 만드는 것은 너무 복잡합니다. 대신:
+완전한 JavaScript 파서(Babel, TypeScript 같은)를 만드는 것은 범위를 벗어납니다. 대신 **실용적인 접근**을 택합니다.
 
 - 브라우저의 네이티브 `Function` 생성자 활용
-- DOM API, `console`, `setTimeout` 등을 주입
+- DOM API, `console`, 타이머 등을 전역 환경에 주입
 - 이벤트 루프와 비동기 처리에 집중
 
-```typescript
-// packages/core/runtime/scripts/interpreter.ts
-import { EventLoop } from "../loop/eventLoop";
+### 인터프리터 구현
 
+```typescript
+//  packages/core/js/interpreter.ts
+
+import { EventLoop } from "../runtime/loop/eventLoop";
+
+/**
+ * 간단한 JavaScript 인터프리터
+ * 전역 환경을 제공하고 코드를 실행합니다.
+ */
 export class JSInterpreter {
-  private globalEnv: Record<string, any> = {};
+  private globalEnv: Record<string, unknown> = {};
   private eventLoop: EventLoop;
 
-  constructor(globalEnv: Record<string, any>, eventLoop: EventLoop) {
-    this.globalEnv = globalEnv;
-    this.eventLoop = eventLoop;
+  constructor(
+    globalScope: Record<string, unknown> = {},
+    eventLoop?: EventLoop
+  ) {
+    this.eventLoop = eventLoop ?? new EventLoop();
+    this.globalEnv = { ...globalScope };
+    this.registerTimerAPIs();
   }
 
-  run(code: string): any {
+  /**
+   * 전역 환경에 새 변수/함수를 추가합니다.
+   */
+  updateGlobals(scope: Record<string, unknown>): void {
+    Object.assign(this.globalEnv, scope);
+  }
+
+  /**
+   * JavaScript 코드를 실행합니다.
+   */
+  run(code: string): unknown {
     try {
-      // globalEnv의 키를 함수 매개변수로, 값을 인자로 전달
       const keys = Object.keys(this.globalEnv);
       const values = Object.values(this.globalEnv);
-
-      // Function 생성자로 코드 실행
       const fn = new Function(...keys, code);
       return fn(...values);
     } catch (error) {
-      console.error("Script execution error:", error);
+      console.error("JS execution error:", error);
       throw error;
     }
   }
 
-  updateGlobals(newGlobals: Record<string, any>): void {
-    Object.assign(this.globalEnv, newGlobals);
-  }
+  /**
+   * 타이머 API를 전역 환경에 등록합니다.
+   */
+  private registerTimerAPIs(): void {
+    const timerAPIs = {
+      setTimeout: (fn: () => void, ms = 0) =>
+        this.eventLoop.setTimeout(() => fn(), ms),
+      clearTimeout: (id: number) => this.eventLoop.clearTimeout(id),
+      setInterval: (fn: () => void, ms = 0) =>
+        this.eventLoop.setInterval(() => fn(), ms),
+      clearInterval: (id: number) => this.eventLoop.clearInterval(id),
+      queueMicrotask: (fn: () => void) =>
+        this.eventLoop.queueMicrotask(() => fn()),
+      requestAnimationFrame: (fn: () => void) =>
+        this.eventLoop.requestAnimationFrame(() => fn()),
+    };
 
-  // 비동기 API
-  setTimeout(fn: Function, ms: number): number {
-    return this.eventLoop.setTimeout(() => fn(), ms);
-  }
-
-  queueMicrotask(fn: Function): void {
-    this.eventLoop.queueMicrotask(() => fn());
+    Object.assign(this.globalEnv, timerAPIs);
   }
 }
 ```
 
 ## DOM 바인딩 구현
 
-### createDOMBindings
-
-```typescript
-// packages/core/runtime/dom/bindings.ts
-import { DOMNode } from "../../html/parser";
-import { matchesSelector } from "../../style/matcher";
-import { findNode } from "../dom/utils";
-
-export function createDOMBindings(
-  root: DOMNode,
-  reflow: () => void
-): Record<string, any> {
-  let nodeIdCounter = 1000;
-
-  return {
-    document: {
-      // 요소 생성
-      createElement(tag: string): DOMNode {
-        return {
-          type: "element",
-          name: tag,
-          attrs: {},
-          children: [],
-          id: nodeIdCounter++,
-        };
-      },
-
-      // 텍스트 노드 생성
-      createTextNode(text: string): DOMNode {
-        return {
-          type: "text",
-          text,
-          id: nodeIdCounter++,
-        };
-      },
-
-      // 요소 추가
-      appendChild(child: DOMNode): void {
-        root.children = root.children || [];
-        root.children.push(child);
-        child.parent = root;
-        reflow(); // DOM 변경 시 리렌더링
-      },
-
-      // 선택자로 요소 찾기
-      querySelector(selector: string): DOMNode | null {
-        return findNode(root, (node) => {
-          return matchesSelector(node, selector);
-        });
-      },
-
-      // ID로 요소 찾기
-      getElementById(id: string): DOMNode | null {
-        return findNode(root, (node) => {
-          return node.attrs?.id === id;
-        });
-      },
-    },
-
-    // 콘솔 API
-    console: {
-      log(...args: any[]): void {
-        console.log("[Guest]", ...args);
-
-        // Canvas에 로그 표시 (선택사항)
-        const logNode: DOMNode = {
-          type: "element",
-          name: "div",
-          attrs: { class: "console-log" },
-          children: [
-            {
-              type: "text",
-              text: args.join(" "),
-            },
-          ],
-          computedStyle: {
-            background: "#f1f3f4",
-            padding: "8px",
-            marginBottom: "4px",
-            fontSize: "14px",
-            color: "#202124",
-          },
-        };
-
-        root.children = root.children || [];
-        root.children.push(logNode);
-        reflow();
-      },
-    },
-
-    // 경고창
-    alert(message: any): void {
-      console.log("[Alert]", message);
-
-      // Canvas에 alert 박스 표시
-      const alertNode: DOMNode = {
-        type: "element",
-        name: "div",
-        attrs: { class: "alert-box" },
-        children: [
-          {
-            type: "text",
-            text: String(message),
-          },
-        ],
-        computedStyle: {
-          background: "#fff3cd",
-          border: "2px solid #ffc107",
-          padding: "20px",
-          margin: "20px",
-          fontSize: "16px",
-          color: "#856404",
-        },
-      };
-
-      root.children = root.children || [];
-      root.children.push(alertNode);
-      reflow();
-    },
-  };
-}
-```
-
 ### DOM 탐색 유틸리티
 
 ```typescript
-// packages/core/runtime/dom/utils.ts
-
+//  packages/core/runtime/dom/utils.ts
 import { DOMNode } from "../../html/parser";
 
+/**
+ * DOM 트리에서 조건에 맞는 노드를 찾습니다.
+ */
 export function findNode(
   node: DOMNode,
   predicate: (node: DOMNode) => boolean
@@ -221,21 +125,58 @@ export function findNode(
   return null;
 }
 
-export function matchesSelector(node: DOMNode, selector: string): boolean {
-  if (selector.startsWith("#")) {
-    return node.attrs?.id === selector.slice(1);
+/**
+ * DOM 트리에서 조건에 맞는 모든 노드를 찾습니다.
+ */
+export function findAllNodes(
+  node: DOMNode,
+  predicate: (node: DOMNode) => boolean
+): DOMNode[] {
+  const results: DOMNode[] = [];
+
+  if (predicate(node)) {
+    results.push(node);
   }
-  if (selector.startsWith(".")) {
-    const className = selector.slice(1);
-    return node.attrs?.class?.split(" ").includes(className) || false;
+
+  if (node.children) {
+    for (const child of node.children) {
+      results.push(...findAllNodes(child, predicate));
+    }
   }
-  return node.name === selector;
+
+  return results;
+}
+
+/**
+ * DOM 트리에서 모든 script 태그의 내용을 추출합니다.
+ */
+export function extractScripts(node: DOMNode): string[] {
+  const scripts: string[] = [];
+
+  if (node.type === "element" && node.name === "script") {
+    const textChild = node.children?.find((c) => c.type === "text");
+    if (textChild?.text) {
+      scripts.push(textChild.text);
+    }
+  }
+
+  if (node.children) {
+    for (const child of node.children) {
+      scripts.push(...extractScripts(child));
+    }
+  }
+
+  return scripts;
 }
 ```
 
 ## 이벤트 루프 구현
 
-### 브라우저 이벤트 루프 구조
+JavaScript의 핵심인 **이벤트 루프**를 구현해봅시다. 이벤트 루프는 비동기 작업을 관리하는 메커니즘입니다.
+
+### 이벤트 루프의 구조
+
+브라우저는 다음 3개의 큐를 순서대로 처리합니다:
 
 ```
 ┌───────────────────────────┐
@@ -262,7 +203,7 @@ export function matchesSelector(node: DOMNode, selector: string): boolean {
 ### EventLoop 클래스
 
 ```typescript
-// packages/core/runtime/loop/eventLoop.ts
+//  packages/core/runtime/loop/eventLoop.ts
 
 type Task = () => void;
 
@@ -273,7 +214,7 @@ export class EventLoop {
   private timers: Map<number, NodeJS.Timeout> = new Map();
   private timerIdCounter = 1;
 
-  // setTimeout 구현
+  // setTimeout 구현 -> macro task queue
   setTimeout(fn: Task, ms: number): number {
     const id = this.timerIdCounter++;
 
@@ -287,7 +228,7 @@ export class EventLoop {
     return id;
   }
 
-  // clearTimeout 구현
+  // clearTimeout 구현 -> macro task queue
   clearTimeout(id: number): void {
     const timer = this.timers.get(id);
     if (timer) {
@@ -296,7 +237,7 @@ export class EventLoop {
     }
   }
 
-  // setInterval 구현
+  // setInterval 구현 -> macro task queue
   setInterval(fn: Task, ms: number): number {
     const id = this.timerIdCounter++;
 
@@ -309,24 +250,24 @@ export class EventLoop {
     return id;
   }
 
-  // clearInterval 구현
+  // clearInterval 구현 -> macro task queue
   clearInterval(id: number): void {
     this.clearTimeout(id);
   }
 
-  // queueMicrotask 구현
+  // queueMicrotask 구현 -> micro task queue
   queueMicrotask(fn: Task): void {
     this.microQueue.push(fn);
     this.run();
   }
 
-  // requestAnimationFrame 구현
+  // requestAnimationFrame 구현 -> render step
   requestAnimationFrame(fn: Task): void {
     this.rafCallbacks.push(fn);
     this.run();
   }
 
-  // 이벤트 루프 실행
+  // 이벤트 루프 실행 -> 위 큐를 순서대로 처리
   private async run(): Promise<void> {
     // 1. 매크로 태스크 하나 실행
     const macro = this.macroQueue.shift();
@@ -372,14 +313,16 @@ export class EventLoop {
 
 ## 이벤트 시스템
 
-### 이벤트 리스너 등록
+사용자 인터랙션(클릭, 키보드 입력 등)을 처리하는 이벤트 시스템을 만들어봅시다.
+
+### 이벤트 디스패처 구현
 
 ```typescript
-// packages/core/runtime/events/dispatcher.ts
+//  packages/core/runtime/events/dispatcher.ts
 
 interface EventHandler {
   type: string;
-  handler: Function;
+  handler: (event: Event) => void;
 }
 
 const eventHandlers = new Map<string, EventHandler[]>();
@@ -387,7 +330,7 @@ const eventHandlers = new Map<string, EventHandler[]>();
 export function addEventListener(
   nodeId: string,
   eventType: string,
-  handler: Function
+  handler: (event: Event) => void
 ): void {
   if (!eventHandlers.has(nodeId)) {
     eventHandlers.set(nodeId, []);
@@ -403,7 +346,7 @@ export function triggerEvent(nodeId: string, eventType: string): void {
   for (const { type, handler } of handlers) {
     if (type === eventType) {
       try {
-        handler();
+        handler(new Event(eventType));
       } catch (error) {
         console.error("Event handler error:", error);
       }
@@ -412,14 +355,30 @@ export function triggerEvent(nodeId: string, eventType: string): void {
 }
 ```
 
-## Canvas 클릭 이벤트 처리
+## 실전 데모
 
-### 클릭 위치 → LayoutBox 매핑
+### part4.html
+
+```html
+<!--  packages/apps/gui/part4.html -->
+<!DOCTYPE html>
+<html>
+  <body>
+    <div id="main">
+      <h1>Event Loop Demo</h1>
+      <button id="btn">Click Me</button>
+      <div id="output"></div>
+    </div>
+  </body>
+</html>
+```
+
+### part4.ts
 
 ```typescript
 // packages/apps/gui/part4.ts
 import { LayoutBox } from "../../core/layout/types";
-import { renderPage } from "../../core/render";
+import { renderPage } from "../../core/utils/render";
 import {
   triggerEvent,
   addEventListener,
@@ -432,6 +391,7 @@ import { layout } from "../../core/layout/engine";
 import { paint } from "../../core/paint/painter";
 import { loadResources } from "../../core/utils/loadResources";
 import { EventLoop } from "../../core/runtime/loop/eventLoop";
+import { setupCanvas } from "../../core/utils/canvas";
 
 const eventLoop = new EventLoop();
 
@@ -467,16 +427,8 @@ async function main() {
     return;
   }
 
-  const ctx = canvas.getContext("2d")!;
-
-  // Canvas의 CSS 크기
-  const cssWidth = canvas.clientWidth || window.innerWidth;
-  const cssHeight = canvas.clientHeight || window.innerHeight;
-
-  // HiDPI 대응: 실제 해상도 설정
-  const pixelRatio = window.devicePixelRatio || 1;
-  canvas.width = cssWidth * pixelRatio;
-  canvas.height = cssHeight * pixelRatio;
+  const { ctx, viewport } = setupCanvas(canvas);
+  const { width: cssWidth, height: cssHeight } = viewport;
 
   // CSS 규칙 로드 및 파싱 (초기 렌더링 후에 사용)
   let cssRules = [] as ReturnType<typeof parseCSS>;
@@ -486,7 +438,7 @@ async function main() {
     htmlUrl: "/part4.html",
     cssUrl: "/part3.css",
     ctx,
-    viewport: { width: cssWidth, height: cssHeight },
+    viewport,
   });
 
   // 이벤트 루프 실행 및 테스트
@@ -537,7 +489,7 @@ async function main() {
     );
 
     // 페인팅
-    paint(currentLayoutTree, { ctx, pixelRatio });
+    paint(currentLayoutTree, { ctx, pixelRatio: window.devicePixelRatio });
   };
 
   // 버튼 클릭 이벤트 핸들러 등록
@@ -609,24 +561,6 @@ async function main() {
 main().catch(console.error);
 ```
 
-## 실전 데모
-
-### part4.html
-
-```html
-<!-- packages/apps/gui/part4.html -->
-<!DOCTYPE html>
-<html>
-  <body>
-    <div id="main">
-      <h1>Event Loop Demo</h1>
-      <button id="btn">Click Me</button>
-      <div id="output"></div>
-    </div>
-  </body>
-</html>
-```
-
 packages/apps/gui/index.html 에서 script 태그를 수정해서 part4.ts 파일을 실행합니다.
 
 ```html
@@ -634,7 +568,9 @@ packages/apps/gui/index.html 에서 script 태그를 수정해서 part4.ts 파�
 <script type="module" src="/part4.ts"></script>
 ```
 
-### 실행 순서
+### 실행 결과
+
+콘솔에 다음과 같은 순서로 출력됩니다:
 
 ```
 이벤트 루프 실행 시작
@@ -643,13 +579,18 @@ packages/apps/gui/index.html 에서 script 태그를 수정해서 part4.ts 파�
 requestAnimationFrame 실행 완료
 setInterval 실행 완료
 setTimeout 실행 완료
-setInterval 실행 완료 - 4번실행 (위에서 한번 실행되었기 때문에, 총 5번 실행됨)
+setInterval 실행 완료
+setInterval 실행 완료
+setInterval 실행 완료
+setInterval 실행 완료
 setInterval 종료
 ```
 
-## 이벤트 루프 작동 과정
+**왜 이런 순서일까요?** 이벤트 루프의 작동 원리를 분석해봅시다.
 
-위 코드의 실행 순서를 단계별로 분석해보겠습니다.
+## 이벤트 루프 작동 원리 분석
+
+위 코드의 실행 순서를 단계별로 자세히 살펴보겠습니다.
 
 ### 실행 순서 분석
 
