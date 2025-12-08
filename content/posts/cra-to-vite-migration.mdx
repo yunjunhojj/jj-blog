@@ -1,0 +1,163 @@
+---
+title: CRA에서 Vite로 안전하게 마이그레이션하기
+date: 2025-12-08
+description: CRA 기반 React 앱을 Vite로 옮기는 이유와 단계별 가이드, 대안 비교를 정리합니다.
+tags: [React, Vite, 마이그레이션, 번들러, 성능]
+category: 개발
+---
+
+> CRA(Create React App)에서 Vite로 옮길 때 무엇이 좋아지는지, 어떻게 옮기는지, Vite 말고 다른 선택지는 없었는지까지 한 번에 정리했습니다.
+
+## 왜 CRA 대신 Vite인가?
+
+- **개발 서버 속도**: Vite는 ESM 기반으로 필요한 모듈만 서빙해 초기 부팅과 HMR 체감 속도가 빠릅니다.
+- **빌드 효율**: Rollup 기반 최적화로 번들 크기와 빌드 시간이 짧습니다.
+- **설정 유연성**: 기본값은 단순하지만 플러그인으로 필요한 설정만 얹기 쉽습니다.
+- **DX(개발 경험)**: 기본 TypeScript, 환경변수, 경로 alias 등 현업에서 자주 쓰는 패턴을 간결히 지원합니다.
+
+## 마이그레이션 단계별 가이드
+
+### 0. 사전 점검
+
+- 기존 CRA 버전, 사용 중인 플러그인(예: CRA 별도 설정, webpack override), 환경 변수 사용처를 목록화합니다.
+- E2E/단위 테스트가 있다면 최소 실행해 현재 기준 동작을 확인합니다.
+
+### 1. CRA 의존성 제거
+
+`react-scripts`를 제거하고 CRA 전용 설정이 있는지 확인합니다.
+
+```bash
+yarn remove react-scripts
+```
+
+### 2. Vite 설치 및 스크립트 교체
+
+```bash
+yarn add -D vite @vitejs/plugin-react
+```
+
+`package.json`의 scripts를 Vite 명령으로 바꿉니다.
+
+```json
+"scripts": {
+  "dev": "vite",
+  "build": "vite build",
+  "preview": "vite preview"
+}
+```
+
+### 3. Vite 설정 파일 추가
+
+프로젝트 루트에 `vite.config.ts`를 생성합니다. 포트나 alias가 필요하면 함께 정의합니다.
+
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import path from "path";
+
+export default defineConfig({
+  plugins: [react()],
+  server: { port: 3000 },
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "src"),
+    },
+  },
+});
+```
+
+### 4. HTML 이동 및 정리
+
+`public/index.html`을 루트로 이동시키고 `%PUBLIC_URL%` 플레이스홀더를 제거합니다. 진입 스크립트를 명시합니다.
+
+```html
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+```
+
+### 5. 엔트리 파일 교체
+
+`src/index.tsx`를 `src/main.tsx`로 변경하고 Vite 기준으로 불러옵니다.
+
+```tsx
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import "./index.css";
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+```
+
+### 6. 환경 변수 규칙 맞추기
+
+- 접두사는 `VITE_`만 노출됩니다. 예: `.env` → `VITE_API_URL=https://api.example.com`
+- 코드에서는 `import.meta.env.VITE_API_URL`로 접근합니다.
+
+### 7. TypeScript 설정 조정
+
+`tsconfig.json`에서 `module`을 `ESNext`로 맞추고, 필요 시 `types`에 `vite/client`를 추가합니다.
+
+```json
+{
+  "compilerOptions": {
+    "module": "ESNext"
+  },
+  "include": ["src", "vite.config.ts"]
+}
+```
+
+### 8. 실행 및 기본 검증
+
+```bash
+yarn dev
+```
+
+- 로컬에서 주요 플로우 동작 확인 (라우팅, 상태 관리, API 호출).
+- 빌드/프리뷰도 확인: `yarn build && yarn preview`.
+
+### 9. 품질/편의 설정(선택)
+
+- ESLint/Prettier: Vite에 맞춰 lint 스크립트를 재구성합니다.
+- 경로 alias: `@`로 `src`를 매핑해 import 가독성 개선.
+- CI/CD: Vite 빌드 명령으로 워크플로우를 갱신합니다.
+
+## 전환 시 체크리스트
+
+- [ ] `react-scripts` 제거 및 Vite 의존성 추가
+- [ ] scripts를 `vite` 기반으로 교체
+- [ ] `vite.config.ts` 생성 및 alias/port 확인
+- [ ] `index.html` 루트 이동 및 `%PUBLIC_URL%` 제거
+- [ ] 엔트리 파일 `main.tsx`로 교체
+- [ ] `VITE_` 환경 변수로 수정
+- [ ] `tsconfig` 모듈/타입 확인
+- [ ] `yarn dev / build / preview` 검증
+- [ ] CI/CD 스크립트 업데이트
+
+## Vite 외 대안은?
+
+- **Turbopack**: 차세대 번들러(webpack 팀). HMR 체감 속도가 매우 빠름. 아직 일부 생태계/플러그인 검증은 진행 중이라 보수적 환경에서는 파일럿 적용을 권장.
+- **Parcel**: 제로 설정 지향. 자동 코드 분할과 캐시가 강점이나, 세밀한 커스텀은 Vite/webpack보다 덜 유연할 수 있음.
+- **Next.js / Remix / Astro 등 프레임워크**: 라우팅·SSR/SSG·이미지 최적화까지 포함된 올인원. 단순 SPA 번들 전환 목적이라면 과하지만, 서버 사이드 렌더링까지 필요하다면 더 적합할 수 있음.
+- **Webpack 커스텀 구성**: 완전한 제어권과 성숙한 생태계. 초기 설정/유지 부담과 HMR 체감 속도는 Vite 대비 불리.
+- **esbuild 단독 구성**: 매우 빠른 빌드. 다만 Rollup 생태계보다 플러그인 선택지가 적어 직접 설정 노력이 필요.
+
+## 마무리
+
+- 빠른 개발 서버, 짧은 빌드 타임, 단순한 설정이 필요하다면 Vite가 균형 잡힌 선택입니다. -> 저 같은 경우는 타 프로젝트들이 vite를 사용하고 있어서 마이그레이션 하였습니다.
+- SSR/SSG가 필수라면 Next.js/Remix, 실험적 성능을 우선하면 Turbopack, 제로 설정을 원하면 Parcel을 검토하세요.
+- 전환 시에는 환경 변수 규칙, 엔트리 파일, HTML 위치, CI/CD 스크립트까지 한 번에 점검하면 시행착오를 크게 줄일 수 있습니다.
