@@ -1,7 +1,7 @@
 "use client";
 
 import { Canvas } from "@react-three/fiber";
-import { Environment, OrbitControls, Text } from "@react-three/drei";
+import { Html, OrbitControls, PerformanceMonitor, Text } from "@react-three/drei";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ThreeEvent } from "@react-three/fiber";
@@ -125,9 +125,12 @@ function Shelf({
 export default function BookshelfScene({ books }: BookshelfSceneProps) {
   const router = useRouter();
   const [hoveredSlug, setHoveredSlug] = useState<string | null>(null);
+  const [dpr, setDpr] = useState<number>(1.5);
+  const [isContextLost, setIsContextLost] = useState(false);
 
   const safeBooks = useMemo(() => books.filter((b) => b.slug && b.title), [books]);
-  const totalBooks = clamp(safeBooks.length, 0, 60);
+  // Text(책 제목) 렌더링이 무겁기 때문에 기본 상한을 둬서 WebGL 컨텍스트 로스트를 예방합니다.
+  const totalBooks = clamp(safeBooks.length, 0, 48);
   const visibleBooks = safeBooks.slice(0, totalBooks);
 
   const shelves = useMemo(() => {
@@ -146,21 +149,39 @@ export default function BookshelfScene({ books }: BookshelfSceneProps) {
 
   return (
     <Canvas
-      shadows
+      // WebGL 안정성(특히 노트북/저사양/탭 전환/핫리로드) 확보를 위해 DPR을 제한합니다.
+      dpr={dpr}
       camera={{ position: [0, 1.6, 8], fov: 45 }}
       onPointerMissed={() => setHoveredSlug(null)}
+      gl={{
+        antialias: true,
+        powerPreference: "high-performance",
+      }}
+      onCreated={({ gl }) => {
+        const onLost = (e: Event) => {
+          // 일부 브라우저에서 기본 동작을 막아야 복구 이벤트가 정상 동작합니다.
+          if ("preventDefault" in e && typeof (e as { preventDefault?: () => void }).preventDefault === "function") {
+            (e as { preventDefault: () => void }).preventDefault();
+          }
+          setIsContextLost(true);
+        };
+        const onRestored = () => setIsContextLost(false);
+
+        gl.domElement.addEventListener("webglcontextlost", onLost, { passive: false });
+        gl.domElement.addEventListener("webglcontextrestored", onRestored);
+      }}
     >
       <color attach="background" args={["#05070d"]} />
-      <ambientLight intensity={0.6} />
+      <ambientLight intensity={0.7} />
+      <hemisphereLight intensity={0.35} groundColor="#05070d" color="#bcd3ff" />
       <directionalLight
         position={[6, 8, 6]}
-        intensity={1.1}
-        castShadow
-        shadow-mapSize-width={1024}
-        shadow-mapSize-height={1024}
+        intensity={0.9}
       />
-
-      <Environment preset="city" />
+      <PerformanceMonitor
+        onDecline={() => setDpr(1)}
+        onIncline={() => setDpr(1.5)}
+      />
       <OrbitControls
         enablePan={false}
         minDistance={5.5}
@@ -170,7 +191,7 @@ export default function BookshelfScene({ books }: BookshelfSceneProps) {
       />
 
       {/* Floor */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.3, 0]} receiveShadow>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.3, 0]}>
         <planeGeometry args={[40, 40]} />
         <meshStandardMaterial color="#0b1220" />
       </mesh>
@@ -214,6 +235,24 @@ export default function BookshelfScene({ books }: BookshelfSceneProps) {
             </group>
           );
         })
+      )}
+
+      {isContextLost && (
+        <Html center>
+          <div className="rounded-lg border border-gray-800 bg-black/70 px-4 py-3 text-sm text-gray-100 backdrop-blur">
+            <div className="font-semibold">WebGL 컨텍스트가 종료되었습니다</div>
+            <div className="mt-1 text-xs text-gray-300">
+              브라우저/탭 전환 또는 GPU 메모리 부족으로 발생할 수 있어요. 새로고침 후 다시 시도해 주세요.
+            </div>
+            <button
+              type="button"
+              className="mt-3 w-full rounded-md bg-white/10 px-3 py-2 text-xs hover:bg-white/20"
+              onClick={() => window.location.reload()}
+            >
+              새로고침
+            </button>
+          </div>
+        </Html>
       )}
     </Canvas>
   );
