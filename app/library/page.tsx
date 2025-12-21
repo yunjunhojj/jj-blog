@@ -1,11 +1,6 @@
 import { getAllPosts, type PostMeta } from "@/lib/posts";
-import dynamic from "next/dynamic";
 import Link from "next/link";
-
-const BookshelfScene = dynamic(
-  () => import("@/components/library/BookshelfScene"),
-  { ssr: false }
-);
+import BookshelfClient from "@/components/library/BookshelfClient";
 
 function toBooks(posts: PostMeta[]) {
   return posts.map((p) => ({ slug: p.slug, title: p.title }));
@@ -28,7 +23,7 @@ export default function LibraryPage() {
 
       <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden">
         <div className="h-[520px]">
-          <BookshelfScene books={books} />
+          <BookshelfClient books={books} />
         </div>
       </section>
 

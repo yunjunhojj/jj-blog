@@ -4,7 +4,6 @@ import { Canvas } from "@react-three/fiber";
 import { Environment, OrbitControls, Text } from "@react-three/drei";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { MeshProps } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 
 export interface BookItem {
@@ -15,6 +14,8 @@ export interface BookItem {
 interface BookshelfSceneProps {
   books: BookItem[];
 }
+
+type Vec3 = readonly [number, number, number];
 
 type BookColorPalette = {
   spine: string;
@@ -63,8 +64,8 @@ function Book({
   slug: string;
   title: string;
   palette: BookColorPalette;
-  position: MeshProps["position"];
-  rotation?: MeshProps["rotation"];
+  position: Vec3;
+  rotation?: Vec3;
   onClick: (slug: string) => void;
   isHovered: boolean;
 }) {
