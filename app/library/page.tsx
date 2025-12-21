@@ -1,14 +1,8 @@
-import { getAllPosts, type PostMeta } from "@/lib/posts";
-import Link from "next/link";
-import BookshelfClient from "@/components/library/BookshelfClient";
-
-function toBooks(posts: PostMeta[]) {
-  return posts.map((p) => ({ slug: p.slug, title: p.title }));
-}
+import { getAllBooks } from "@/lib/books";
+import BookCard from "@/components/library/BookCard";
 
 export default function LibraryPage() {
-  const posts = getAllPosts();
-  const books = toBooks(posts);
+  const books = getAllBooks();
 
   return (
     <div className="space-y-10">
@@ -17,37 +11,19 @@ export default function LibraryPage() {
           서재
         </h1>
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          책을 클릭하면 해당 글로 이동합니다.
+          책을 클릭하면 해당 글로 이동합니다. 책에 마우스를 올리면 읽기 상태를 설정할 수 있습니다.
         </p>
       </header>
-
-      <section className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden">
-        <div className="h-[520px]">
-          <BookshelfClient books={books} />
-        </div>
-      </section>
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
           전체 글 목록
         </h2>
-        <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {posts.map((post) => (
-            <li key={post.slug}>
-              <Link
-                href={`/posts/${post.slug}`}
-                className="block rounded-lg border border-gray-200 dark:border-gray-800 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-900 transition-colors"
-              >
-                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                  {post.title}
-                </div>
-                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  {post.date} · {post.readTime}
-                </div>
-              </Link>
-            </li>
+        <div className="grid gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          {books.map((book) => (
+            <BookCard key={book.slug} book={book} />
           ))}
-        </ul>
+        </div>
       </section>
     </div>
   );
