@@ -3,6 +3,20 @@ import createMDX from "@next/mdx";
 
 const nextConfig: NextConfig = {
   pageExtensions: ["js", "jsx", "md", "mdx", "ts", "tsx"],
+  async redirects() {
+    return [
+      {
+        source: "/서재",
+        destination: "/library",
+        permanent: true,
+      },
+      {
+        source: "/%EC%84%9C%EC%9E%AC",
+        destination: "/library",
+        permanent: true,
+      },
+    ];
+  },
   turbopack: {
     rules: {
       "*.svg": {
