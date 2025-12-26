@@ -17,7 +17,7 @@ export default function BlogHeader() {
               href="/"
               className="text-xl font-bold text-gray-900 dark:text-gray-100"
             >
-              개발자 블로그
+              JJ의 블로그
             </Link>
             <div className="hidden md:flex items-center space-x-6">
               <Link
@@ -85,4 +85,3 @@ export default function BlogHeader() {
     </header>
   );
 }
-
