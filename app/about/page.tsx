@@ -263,10 +263,10 @@ export default function AboutPage() {
         </div>
       </section>
 
-      {/* Education */}
+      {/* 그외 이력 */}
       <section className="mb-12">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4">
-          Education
+          Others
         </h2>
         <div className="bg-white dark:bg-gray-900 rounded-lg shadow-sm p-6 border border-gray-200 dark:border-gray-800">
           <div className="mb-4">
@@ -284,84 +284,6 @@ export default function AboutPage() {
             <p className="text-sm text-gray-600 dark:text-gray-400">
               2019 ~ 2022
             </p>
-          </div>
-        </div>
-      </section>
-
-      {/* Skills */}
-      <section className="mb-12">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4">
-          Skills
-        </h2>
-        <div className="bg-white dark:bg-gray-900 rounded-lg shadow-sm p-6 border border-gray-200 dark:border-gray-800">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">
-                Frontend
-              </h3>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  "React",
-                  "Next.js",
-                  "TypeScript",
-                  "JavaScript",
-                  "Vue.js",
-                  "Tailwind CSS",
-                  "Emotion",
-                  "D3.js",
-                ].map((skill) => (
-                  <span
-                    key={skill}
-                    className="px-3 py-1.5 text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-full"
-                  >
-                    {skill}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div>
-              <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">
-                Backend & DevOps
-              </h3>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  "FastAPI",
-                  "Node.js",
-                  "Cloud Build",
-                  "Cloud Run",
-                  "Docker",
-                  "CI/CD",
-                ].map((skill) => (
-                  <span
-                    key={skill}
-                    className="px-3 py-1.5 text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-full"
-                  >
-                    {skill}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div>
-              <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">
-                Tools & Others
-              </h3>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  "Git",
-                  "Playwright",
-                  "React Query",
-                  "LangChain",
-                  "OpenAPI Generator",
-                ].map((skill) => (
-                  <span
-                    key={skill}
-                    className="px-3 py-1.5 text-sm font-medium bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-full"
-                  >
-                    {skill}
-                  </span>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       </section>
